@@ -1,0 +1,141 @@
+<SyncScreen>:
+
+
+    MDBoxLayout:
+
+
+        orientation: "vertical"
+
+
+        padding: "15dp"
+
+
+        spacing: "15dp"
+
+
+
+        MDTopAppBar:
+
+
+            title: "Sync Data"
+
+
+
+
+        MDCard:
+
+
+            size_hint_y: None
+
+            height: "120dp"
+
+
+            padding: "15dp"
+
+
+            radius: [15,15,15,15]
+
+
+
+            MDBoxLayout:
+
+
+                orientation:"vertical"
+
+
+
+                MDLabel:
+
+
+                    id: lbl_waiting
+
+
+                    text:"Waiting : 0"
+
+
+
+
+                MDLabel:
+
+
+                    id: lbl_error
+
+
+                    text:"Error : 0"
+
+
+
+
+                MDLabel:
+
+
+                    id: lbl_success
+
+
+                    text:"Success : 0"
+
+
+
+
+
+        MDLabel:
+
+
+            id: lbl_status
+
+
+            text:"Ready"
+
+            halign:"center"
+
+
+
+
+
+        MDRaisedButton:
+
+
+            text:"SYNC NOW"
+
+
+            pos_hint:
+
+
+                {"center_x":0.5}
+
+
+
+            on_release:
+
+
+                root.start_sync()
+
+
+
+
+
+        MDRaisedButton:
+
+
+            text:"RETRY ERROR"
+
+
+            pos_hint:
+
+
+                {"center_x":0.5}
+
+
+
+            on_release:
+
+
+                root.retry_sync()
+
+
+
+
+
+        Widget:
+
+            size_hint_y:1

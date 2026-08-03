@@ -1,0 +1,428 @@
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+<AuditScreen>:
+    name: "audit_screen"
+
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "6dp"
+        spacing: "2dp"
+
+        MDBoxLayout:
+            size_hint_y: None
+            height: "40dp"
+            spacing: "4dp"
+            padding: "4dp", "0dp"
+            md_bg_color: 0.16, 0.58, 0.28, 1
+
+            MDFlatButton:
+                text: "< กลับ"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                size_hint_x: None
+                width: "76dp"
+                on_release: root.go_back()
+
+            MDLabel:
+                text: "ตรวจสอบสต๊อก"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                bold: True
+                halign: "center"
+
+            MDLabel:
+                id: lbl_device_short
+                text: root.ids.txt_checker.text if root.ids.txt_checker else ""
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                halign: "right"
+                shorten: True
+                shorten_from: "left"
+                size_hint_x: .75
+
+        MDBoxLayout:
+            size_hint_y: None
+            height: "38dp"
+            spacing: "2dp"
+
+            MDRaisedButton:
+                id: tab_audit
+                text: "Audit"
+                font_name: "ThaiFont"
+                on_release: root.switch_tab("audit_tab")
+
+            MDFlatButton:
+                id: tab_recent
+                text: "ล่าสุด"
+                font_name: "ThaiFont"
+                on_release: root.switch_tab("recent_tab")
+
+            MDFlatButton:
+                id: tab_sync
+                text: "Sync"
+                font_name: "ThaiFont"
+                on_release: root.switch_tab("sync_tab")
+
+        ScreenManager:
+            id: audit_tab_manager
+            transition: NoTransition()
+
+            MDScreen:
+                name: "audit_tab"
+                md_bg_color: 1, 1, 1, 1
+
+                MDBoxLayout:
+                    orientation: "vertical"
+                    spacing: "1dp"
+
+                    MDLabel:
+                        id: lbl_status
+                        text: ""
+                        font_name: "ThaiFont"
+                        bold: True
+                        theme_text_color: "Custom"
+                        text_color: 0.85, 0.05, 0.05, 1
+                        halign: "center"
+                        valign: "middle"
+                        text_size: self.width, None
+                        size_hint_y: None
+                        height: "32dp"
+                        shorten: True
+
+                    MDLabel:
+                        id: lbl_plan_name
+                        text: ""
+                        font_name: "ThaiFont"
+                        bold: True
+                        halign: "left"
+                        size_hint_y: None
+                        height: "28dp"
+                        shorten: True
+
+                    MDLabel:
+                        id: lbl_plan_detail
+                        text: ""
+                        size_hint_y: None
+                        height: "0dp"
+                        opacity: 0
+
+                    MDCard:
+                        orientation: "horizontal"
+                        padding: "6dp", "0dp"
+                        spacing: "2dp"
+                        size_hint_y: None
+                        height: "40dp"
+
+                        MDLabel:
+                            text: "LOC"
+                            font_name: "ThaiFont"
+                            bold: True
+                            size_hint_x: None
+                            width: "42dp"
+                            halign: "center"
+
+                        MDLabel:
+                            id: lbl_location
+                            text: "กรุณายิง Barcode Location"
+                            font_name: "ThaiFont"
+                            bold: True
+                            halign: "left"
+                            valign: "middle"
+                            text_size: self.size
+                            shorten: True
+
+                    MDTextField:
+                        id: txt_checker
+                        readonly: True
+                        multiline: False
+                        size_hint_y: None
+                        height: "0dp"
+                        opacity: 0
+                        disabled: True
+
+                    MDTextField:
+                        id: txt_barcode
+                        hint_text: "ยิง Location / Barcode / รหัสสินค้า"
+                        font_name: "ThaiFont"
+                        multiline: False
+                        size_hint_y: None
+                        height: "44dp"
+                        on_text_validate: root.process_scan(self.text)
+
+                    MDCard:
+                        orientation: "vertical"
+                        padding: "7dp", "2dp"
+                        spacing: "0dp"
+                        size_hint_y: None
+                        height: "86dp"
+
+                        MDLabel:
+                            id: lbl_item_code
+                            text: "รหัสสินค้า: -"
+                            font_name: "ThaiFont"
+                            bold: True
+                            shorten: True
+
+                        MDLabel:
+                            id: lbl_item_name
+                            text: "ชื่อสินค้า: -"
+                            font_name: "ThaiFont"
+                            shorten: True
+
+                        MDLabel:
+                            id: lbl_unit
+                            text: "หน่วย: -"
+                            font_name: "ThaiFont"
+                            shorten: True
+
+                    MDBoxLayout:
+                        size_hint_y: None
+                        height: "50dp"
+                        spacing: "5dp"
+
+                        MDTextField:
+                            id: txt_qty
+                            hint_text: "กรอกจำนวน Audit"
+                            text: ""
+                            input_filter: "float"
+                            multiline: False
+                            on_text_validate: root.save_current_item()
+
+                        MDFlatButton:
+                            id: btn_calculator
+                            text: "คำนวณ"
+                            font_name: "ThaiFont"
+                            size_hint_x: None
+                            width: "86dp"
+                            on_release: root.open_calculator()
+
+                    MDBoxLayout:
+                        size_hint_y: None
+                        height: "48dp"
+                        spacing: "6dp"
+
+                        MDRaisedButton:
+                            id: btn_save
+                            text: "บันทึก"
+                            font_name: "ThaiFont"
+                            disabled: True
+                            on_release: root.save_current_item()
+
+                        MDRaisedButton:
+                            id: btn_change_location
+                            text: "เปลี่ยน LOC"
+                            font_name: "ThaiFont"
+                            theme_text_color: "Custom"
+                            text_color: 1, 1, 1, 1
+                            md_bg_color: 0.16, 0.58, 0.28, 1
+                            disabled: True
+                            on_release: root.reset_location()
+
+                    Widget:
+
+            MDScreen:
+                name: "recent_tab"
+                md_bg_color: 1, 1, 1, 1
+
+                MDBoxLayout:
+                    orientation: "vertical"
+                    spacing: "0dp"
+                    padding: "2dp"
+
+                    MDCard:
+                        id: recent_mode_card
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: "66dp"
+                        padding: "6dp", "3dp"
+                        spacing: "2dp"
+                        md_bg_color: 0.88, 1.0, 0.90, 1
+
+                        MDLabel:
+                            id: lbl_recent_mode
+                            text: "MODE: แก้จำนวน (เลือก 1 รายการ)"
+                            font_name: "ThaiFont"
+                            bold: True
+                            halign: "center"
+                            theme_text_color: "Custom"
+                            text_color: 0.05, 0.55, 0.20, 1
+
+                        MDBoxLayout:
+                            size_hint_y: None
+                            height: "34dp"
+                            spacing: "4dp"
+
+                            MDRaisedButton:
+                                id: btn_location_mode
+                                text: "เปลี่ยนเป็นแก้ LOC"
+                                font_name: "ThaiFont"
+                                md_bg_color: 0.16, 0.58, 0.28, 1
+                                on_release: root.switch_correction_mode()
+
+                            MDRaisedButton:
+                                id: btn_apply_location
+                                text: "ยืนยัน (0)"
+                                font_name: "ThaiFont"
+                                size_hint_x: None
+                                width: "0dp"
+                                opacity: 0
+                                disabled: True
+                                on_release: root.open_location_correction()
+
+                    MDLabel:
+                        text: "15 รายการล่าสุดจาก SQLite"
+                        font_name: "ThaiFont"
+                        size_hint_y: None
+                        height: "22dp"
+                        font_size: "12sp"
+                        theme_text_color: "Secondary"
+
+                    ScrollView:
+                        id: recent_scroll
+                        do_scroll_x: False
+                        do_scroll_y: True
+                        bar_width: "6dp"
+                        bar_margin: "1dp"
+                        scroll_type: ["bars", "content"]
+
+                        MDBoxLayout:
+                            id: recent_list
+                            orientation: "vertical"
+                            size_hint_y: None
+                            height: self.minimum_height
+                            spacing: "0dp"
+                            padding: "0dp"
+
+            MDScreen:
+                name: "sync_tab"
+                md_bg_color: 1, 1, 1, 1
+
+                MDBoxLayout:
+                    orientation: "vertical"
+                    padding: "6dp"
+                    spacing: "5dp"
+
+                    MDCard:
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: "48dp"
+                        padding: "8dp"
+                        spacing: "0dp"
+                        md_bg_color: 0.90, 0.98, 0.92, 1
+
+                        MDLabel:
+                            id: lbl_sync_device
+                            text: "Device - | Plan -"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            bold: True
+                            halign: "center"
+
+                        MDLabel:
+                            id: lbl_sync_plan
+                            text: ""
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            size_hint_y: None
+                            height: "0dp"
+                            opacity: 0
+
+                    MDCard:
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: "58dp"
+                        padding: "8dp"
+                        spacing: "0dp"
+
+                        MDLabel:
+                            text: "ในเครื่อง"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            bold: True
+                            halign: "center"
+
+                        MDLabel:
+                            id: lbl_local_summary
+                            text: "รอส่ง 0   ส่งแล้ว 0   ผิดพลาด 0"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            halign: "center"
+
+                    MDCard:
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: "58dp"
+                        padding: "8dp"
+                        spacing: "0dp"
+
+                        MDLabel:
+                            text: "บน Server"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            bold: True
+                            halign: "center"
+
+                        MDLabel:
+                            id: lbl_server_summary
+                            text: "รอ Process 0   สำเร็จ 0   ผิดพลาด 0"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            halign: "center"
+
+                    MDLabel:
+                        id: lbl_sync_status
+                        text: "พร้อมใช้งาน"
+                        font_name: "ThaiFont"
+                        font_size: "14sp"
+                        halign: "center"
+                        valign: "middle"
+                        text_size: self.size
+                        size_hint_y: None
+                        height: "36dp"
+
+                    MDRaisedButton:
+                        id: btn_sync_now
+                        text: "1. ส่งข้อมูล"
+                        disabled: True
+                        font_name: "ThaiFont"
+                        font_size: "14sp"
+                        size_hint_y: None
+                        height: "42dp"
+                        pos_hint: {"center_x": 0.5}
+                        on_release: root.start_sync()
+
+                    MDRaisedButton:
+                        id: btn_process_server
+                        text: "2. Process"
+                        disabled: True
+                        font_name: "ThaiFont"
+                        font_size: "14sp"
+                        size_hint_y: None
+                        height: "42dp"
+                        pos_hint: {"center_x": 0.5}
+                        on_release: root.process_server_data()
+
+                    MDBoxLayout:
+                        size_hint_y: None
+                        height: "40dp"
+                        spacing: "5dp"
+
+                        MDRaisedButton:
+                            id: btn_retry_sync
+                            text: "Retry"
+                            disabled: True
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            on_release: root.retry_sync()
+
+                        MDFlatButton:
+                            id: btn_refresh_sync
+                            text: "Refresh"
+                            font_name: "ThaiFont"
+                            font_size: "14sp"
+                            on_release: root.load_sync_status()
+
+                    Widget:

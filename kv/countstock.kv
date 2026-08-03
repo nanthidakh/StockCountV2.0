@@ -1,0 +1,446 @@
+#:import OneLineListItem kivymd.uix.list.OneLineListItem
+
+<CountStockHeader@MDBoxLayout>:
+    size_hint_y: None
+    height: "56dp"
+    padding: "4dp", 0
+    md_bg_color: app.theme_cls.primary_color
+
+<CountStockMenuScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "12dp"
+        spacing: "8dp"
+
+        MDBoxLayout:
+            size_hint_y: None
+            height: "48dp"
+
+            MDFlatButton:
+                text: "กลับ"
+                font_name: "ThaiFont"
+                size_hint_x: None
+                width: "80dp"
+                on_release: root.go_launcher()
+
+            MDLabel:
+                text: "CountStock"
+                font_name: "ThaiFont"
+                bold: True
+                halign: "center"
+
+            Widget:
+                size_hint_x: None
+                width: "80dp"
+
+        MDLabel:
+            text: "เตรียมข้อมูลนับสต๊อก"
+            font_name: "ThaiFont"
+            bold: True
+            halign: "center"
+            size_hint_y: None
+            height: "42dp"
+
+        MDLabel:
+            text: "เลือกเมนูที่ต้องการใช้งาน"
+            font_name: "ThaiFont"
+            halign: "center"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: "30dp"
+
+        ScrollView:
+            do_scroll_x: False
+
+            MDBoxLayout:
+                orientation: "vertical"
+                spacing: "8dp"
+                size_hint_y: None
+                height: self.minimum_height
+
+                MDRaisedButton:
+                    text: "ตั้งค่า CountStock"
+                    font_name: "ThaiFont"
+                    size_hint_x: 1
+                    size_hint_y: None
+                    height: "48dp"
+                    on_release: root.go_to("countstock_config")
+
+                MDRaisedButton:
+                    text: "Import Product Data"
+                    font_name: "ThaiFont"
+                    size_hint_x: 1
+                    size_hint_y: None
+                    height: "48dp"
+                    on_release: root.go_to("countstock_import")
+
+                MDRaisedButton:
+                    text: "เก็บรายการสินค้า"
+                    font_name: "ThaiFont"
+                    size_hint_x: 1
+                    size_hint_y: None
+                    height: "48dp"
+                    on_release: root.go_to("countstock_scan")
+
+                MDRaisedButton:
+                    text: "Export Data"
+                    font_name: "ThaiFont"
+                    size_hint_x: 1
+                    size_hint_y: None
+                    height: "48dp"
+                    on_release: root.go_to("countstock_export")
+
+                MDRaisedButton:
+                    text: "ออกจากโปรแกรม"
+                    font_name: "ThaiFont"
+                    size_hint_x: 1
+                    size_hint_y: None
+                    height: "48dp"
+                    md_bg_color: 0.35, 0.35, 0.35, 1
+                    on_release: root.exit_app()
+
+        MDLabel:
+            text: "Version " + str(app.version)
+            font_name: "ThaiFont"
+            halign: "center"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: "28dp"
+
+<CountStockConfigScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+        CountStockHeader:
+            MDFlatButton:
+                text: "กลับ"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                size_hint_x: None
+                width: "80dp"
+                on_release: root.go_back()
+            MDLabel:
+                text: "CountStock Configuration"
+                font_name: "ThaiFont"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+            Widget:
+                size_hint_x: None
+                width: "80dp"
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: "20dp"
+            spacing: "14dp"
+            MDTextField:
+                id: txt_iis_ip
+                hint_text: "IIS Server IP"
+                mode: "rectangle"
+            MDRaisedButton:
+                text: "โหลด config.ashx"
+                font_name: "ThaiFont"
+                size_hint: 1, None
+                height: "50dp"
+                on_release: root.fetch_config()
+            MDRaisedButton:
+                id: btn_branch
+                text: "เลือกสาขา"
+                font_name: "ThaiFont"
+                size_hint: 1, None
+                height: "50dp"
+            MDLabel:
+                id: lbl_detail
+                text: "DB: -\nเดือน: -"
+                font_name: "ThaiFont"
+                halign: "center"
+            MDRaisedButton:
+                text: "บันทึก"
+                font_name: "ThaiFont"
+                size_hint: 1, None
+                height: "50dp"
+                on_release: root.save()
+            Widget:
+
+<CountStockImportScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+        CountStockHeader:
+            MDFlatButton:
+                text: "กลับ"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                size_hint_x: None
+                width: "80dp"
+                on_release: root.go_back()
+            MDLabel:
+                text: "Import Product Data"
+                font_name: "ThaiFont"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+            Widget:
+                size_hint_x: None
+                width: "80dp"
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: "20dp"
+            spacing: "16dp"
+            MDLabel:
+                id: lbl_sqlite_count
+                text: "ข้อมูลใน SQLite\nสินค้า 0 รายการ | บาร์โค้ด 0 รายการ"
+                font_name: "ThaiFont"
+                halign: "center"
+                size_hint_y: None
+                height: "70dp"
+            MDLabel:
+                id: lbl_status
+                text: "พร้อมนำเข้าข้อมูลสินค้า"
+                font_name: "ThaiFont"
+                halign: "center"
+            MDRaisedButton:
+                id: btn_import
+                text: "IMPORT"
+                size_hint: 1, None
+                height: "55dp"
+                on_release: root.start_import()
+            Widget:
+
+<CountStockScanScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+
+        CountStockHeader:
+            MDFlatButton:
+                text: "กลับ"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                size_hint_x: None
+                width: "80dp"
+                on_release: root.go_back()
+
+            MDLabel:
+                text: "เก็บรายการสินค้า"
+                font_name: "ThaiFont"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+
+            Widget:
+                size_hint_x: None
+                width: "80dp"
+
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: "10dp"
+            spacing: "6dp"
+
+            MDTextField:
+                id: txt_staff
+                hint_text: "ผู้เก็บข้อมูล"
+                font_name: "ThaiFont"
+                mode: "rectangle"
+                multiline: False
+                write_tab: False
+                size_hint_y: None
+                height: "48dp"
+                on_touch_down: root.prepare_field(self, args[1], True)
+                on_text_validate: root.on_staff_validate()
+
+            MDBoxLayout:
+                size_hint_y: None
+                height: "48dp"
+                spacing: "5dp"
+
+                MDTextField:
+                    id: txt_location
+                    hint_text: "Location"
+                    font_name: "ThaiFont"
+                    mode: "rectangle"
+                    multiline: False
+                    write_tab: False
+                    readonly: root.location_locked
+                    on_touch_down: root.prepare_location_field(self, args[1])
+                    on_text_validate: root.on_location_validate()
+
+                MDRaisedButton:
+                    id: btn_lock_location
+                    text: "ล็อก LOC"
+                    font_name: "ThaiFont"
+                    size_hint_x: None
+                    width: "105dp"
+                    md_bg_color: (0.16, 0.58, 0.28, 1) if root.location_locked else app.theme_cls.primary_color
+                    on_release: root.toggle_location_lock()
+
+            MDTextField:
+                id: txt_barcode
+                hint_text: "Barcode / Item Code"
+                font_name: "ThaiFont"
+                mode: "rectangle"
+                multiline: False
+                write_tab: False
+                size_hint_y: None
+                height: "48dp"
+                on_touch_down: root.prepare_field(self, args[1], True)
+                on_text_validate: root.scan()
+
+            MDLabel:
+                id: lbl_result
+                text: "พร้อมสแกน"
+                font_name: "ThaiFont"
+                halign: "center"
+                valign: "middle"
+                text_size: self.width, None
+                size_hint_y: None
+                height: "56dp"
+
+            MDLabel:
+                text: "รายการล่าสุด — แก้ LOC/ลบได้เฉพาะรายการที่ยังไม่ Sync"
+                font_name: "ThaiFont"
+                bold: True
+                font_size: "13sp"
+                size_hint_y: None
+                height: "28dp"
+
+            ScrollView:
+                do_scroll_x: False
+
+                MDBoxLayout:
+                    id: recent_list
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: self.minimum_height
+                    spacing: "2dp"
+
+<CountStockExportScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+
+        CountStockHeader:
+            MDFlatButton:
+                text: "กลับ"
+                font_name: "ThaiFont"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                size_hint_x: None
+                width: "80dp"
+                on_release: root.go_back()
+            MDLabel:
+                text: "Export CountStock"
+                font_name: "ThaiFont"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+            Widget:
+                size_hint_x: None
+                width: "80dp"
+
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: "16dp"
+            spacing: "12dp"
+
+            MDLabel:
+                id: lbl_export_count
+                text: "ข้อมูลทั้งหมด 0 รายการ\nSync แล้ว 0 | ยังไม่ Sync 0"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                halign: "center"
+                size_hint_y: None
+                height: "78dp"
+
+            MDLabel:
+                text: "เลือกตารางที่ต้องการ Sync"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                bold: True
+                size_hint_y: None
+                height: "30dp"
+
+            MDBoxLayout:
+                size_hint_y: None
+                height: "46dp"
+                spacing: "8dp"
+                padding: "6dp", 0
+                md_bg_color: (*app.theme_cls.primary_color[:3], .22) if chk_scan_data.active else (0, 0, 0, 0)
+
+                MDCheckbox:
+                    id: chk_scan_data
+                    size_hint: None, None
+                    size: "44dp", "44dp"
+                    active: True
+                    selected_color: app.theme_cls.primary_color
+                    unselected_color: .45, .45, .45, 1
+                    on_active: root.on_target_changed()
+
+                MDLabel:
+                    text: "Countstock_scan_data"
+                    font_name: "ThaiFont"
+                    font_size: "14sp"
+                    valign: "middle"
+                    text_size: self.size
+
+            MDBoxLayout:
+                size_hint_y: None
+                height: "46dp"
+                spacing: "8dp"
+                padding: "6dp", 0
+                md_bg_color: (*app.theme_cls.primary_color[:3], .22) if chk_scan_slottag.active else (0, 0, 0, 0)
+
+                MDCheckbox:
+                    id: chk_scan_slottag
+                    size_hint: None, None
+                    size: "44dp", "44dp"
+                    active: False
+                    selected_color: app.theme_cls.primary_color
+                    unselected_color: .45, .45, .45, 1
+                    on_active: root.on_target_changed()
+
+                MDLabel:
+                    text: "Countstock_scan_slottag"
+                    font_name: "ThaiFont"
+                    font_size: "14sp"
+                    valign: "middle"
+                    text_size: self.size
+
+            MDRaisedButton:
+                id: btn_export_selected
+                text: "Sync ตารางที่เลือก"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                size_hint: 1, None
+                height: "50dp"
+                on_release: root.export_selected()
+
+            MDLabel:
+                id: lbl_status
+                text: "พร้อมส่งข้อมูล"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                halign: "center"
+                valign: "middle"
+                text_size: self.size
+                size_hint_y: None
+                height: "54dp"
+
+            MDLabel:
+                text: "เลือกได้ทั้ง 2 ตาราง หรือเลือกเพียงตารางเดียว"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                theme_text_color: "Secondary"
+                halign: "center"
+                size_hint_y: None
+                height: "32dp"
+
+            MDRaisedButton:
+                text: "ล้างข้อมูลในเครื่อง"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                size_hint: 1, None
+                height: "50dp"
+                md_bg_color: .8, .2, .2, 1
+                on_release: root.clear_data()
+
+            Widget:
+

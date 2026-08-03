@@ -1,0 +1,40 @@
+<LauncherScreen>:
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "20dp"
+        spacing: "16dp"
+
+        Widget:
+
+        MDLabel:
+            text: "ระบบนับสต๊อก"
+            font_name: "ThaiFont"
+            bold: True
+            halign: "center"
+            font_size: "26sp"
+            size_hint_y: None
+            height: "60dp"
+
+        MDRaisedButton:
+            text: "1. เตรียมข้อมูล"
+            font_name: "ThaiFont"
+            size_hint: 1, None
+            height: "60dp"
+            on_release: root.open_countstock()
+
+        MDRaisedButton:
+            text: "2. นับสต๊อก"
+            font_name: "ThaiFont"
+            size_hint: 1, None
+            height: "60dp"
+            on_release: root.open_hwk_stock()
+
+        MDRaisedButton:
+            text: "3. ออก"
+            font_name: "ThaiFont"
+            size_hint: 1, None
+            height: "60dp"
+            md_bg_color: .35, .35, .35, 1
+            on_release: root.exit_app()
+
+        Widget:

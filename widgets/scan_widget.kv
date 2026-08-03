@@ -1,0 +1,23 @@
+<ScanWidget>:
+
+
+    orientation:"horizontal"
+
+
+    MDTextField:
+
+
+        id:txt_scan
+
+
+        hint_text:"Scan Barcode"
+
+
+        on_text_validate:
+
+
+            root.receive_barcode(
+
+            self.text
+
+            )

@@ -1,0 +1,58 @@
+<LoginScreen>
+
+
+    MDBoxLayout:
+
+        orientation:"vertical"
+
+        padding:"30dp"
+
+        spacing:"20dp"
+
+
+
+        MDLabel:
+
+            text:"HWK Stock V1"
+
+            halign:"center"
+
+            font_size:"26sp"
+
+
+
+        MDTextField:
+
+            id:txt_username
+
+            hint_text:"User"
+
+
+
+        MDTextField:
+
+            id:txt_device
+
+            hint_text:"Device Name"
+
+
+
+        MDLabel:
+
+            id:lbl_message
+
+            halign:"center"
+
+
+
+        MDRaisedButton:
+
+            text:"LOGIN"
+
+            pos_hint:
+
+                {"center_x":0.5}
+
+            on_release:
+
+                root.login()

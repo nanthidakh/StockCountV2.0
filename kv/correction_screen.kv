@@ -1,0 +1,141 @@
+<CorrectionScreen>:
+
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "8dp"
+        spacing: "6dp"
+
+        # =====================================================
+        # Header
+        # =====================================================
+        MDBoxLayout:
+            size_hint_y: None
+            height: "52dp"
+
+            MDFlatButton:
+                text: "< ล่าสุด"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                size_hint_x: None
+                width: "96dp"
+                on_release: root.go_count_recent()
+
+            MDLabel:
+                id: lbl_title
+                text: "แก้ไขจำนวน"
+                font_name: "ThaiFont"
+                font_size: "18sp"
+                bold: True
+                halign: "center"
+                valign: "middle"
+                text_size: self.size
+
+            Widget:
+                size_hint_x: None
+                width: "96dp"
+
+        # =====================================================
+        # Current Mode
+        # =====================================================
+        MDCard:
+            id: mode_card
+            orientation: "vertical"
+            size_hint_y: None
+            height: "62dp"
+            padding: "8dp"
+            radius: ["8dp"]
+            md_bg_color: 0.88, 1.0, 0.90, 1
+
+            MDLabel:
+                id: lbl_mode
+                text: "MODE: แก้จำนวน"
+                font_name: "ThaiFont"
+                font_size: "18sp"
+                bold: True
+                halign: "center"
+                valign: "middle"
+                text_size: self.size
+
+        # =====================================================
+        # Status / Error
+        # =====================================================
+        MDLabel:
+            id: lbl_status
+            text: ""
+            font_name: "ThaiFont"
+            font_size: "17sp"
+            bold: True
+            theme_text_color: "Custom"
+            text_color: 0.85, 0.05, 0.05, 1
+            halign: "center"
+            valign: "middle"
+            text_size: self.width - dp(8), None
+            size_hint_y: None
+            height: max(dp(48), self.texture_size[1] + dp(10))
+
+        # =====================================================
+        # Selected Data
+        # =====================================================
+        MDCard:
+            orientation: "vertical"
+            padding: "10dp"
+            size_hint_y: None
+            height: "126dp"
+            radius: ["8dp"]
+
+            MDLabel:
+                id: lbl_selected
+                text: "กรุณาเลือกรายการจาก Tab ล่าสุด"
+                font_name: "ThaiFont"
+                font_size: "16sp"
+                valign: "middle"
+                halign: "left"
+                text_size: self.width, None
+
+        # =====================================================
+        # Qty Input
+        # =====================================================
+        MDTextField:
+            id: txt_qty
+            hint_text: "กรอกจำนวนใหม่"
+            font_name: "ThaiFont"
+            font_size: "18sp"
+            text: ""
+            input_filter: "float"
+            multiline: False
+            size_hint_y: None
+            height: "68dp"
+            padding: "12dp", "14dp"
+            on_text_validate: root.save_correction()
+
+        # =====================================================
+        # Location Input
+        # =====================================================
+        MDTextField:
+            id: txt_location
+            hint_text: "ยิงหรือกรอก Location ใหม่"
+            font_name: "ThaiFont"
+            font_size: "18sp"
+            text: ""
+            multiline: False
+            disabled: True
+            opacity: 0
+            size_hint_y: None
+            height: "0dp"
+            padding: "12dp", "14dp"
+            on_text_validate: root.save_correction()
+
+        # =====================================================
+        # Save Button
+        # =====================================================
+        MDRaisedButton:
+            id: btn_save
+            text: "บันทึกการแก้ไข"
+            font_name: "ThaiFont"
+            font_size: "18sp"
+            size_hint_y: None
+            height: "54dp"
+            pos_hint: {"center_x": .5}
+            on_release: root.save_correction()
+
+        Widget:
