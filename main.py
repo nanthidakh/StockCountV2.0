@@ -14,11 +14,13 @@ from kivy.core.window import Window
 
 from app import HWKStockApp
 
-
-Window.size = (
-    380,
-    680
-)
+# กำหนดขนาดหน้าต่างเฉพาะตอนทดสอบบน Desktop เท่านั้น
+# Android ต้องใช้ขนาดหน้าจอจริงของอุปกรณ์ เพื่อให้พิกัดภาพและ Touch ตรงกัน
+if platform not in ("android", "ios"):
+    Window.size = (
+        380,
+        680
+    )
 
 Window.softinput_mode = "below_target"
 
