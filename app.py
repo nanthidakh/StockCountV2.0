@@ -78,6 +78,17 @@ class HWKStockApp(MDApp):
         )
 
         self.db.connect()
+
+        # Create and upgrade SQLite schema before reading app_config.
+        # A fresh Android installation starts with an empty database file.
+        init_database(
+            self.db
+        )
+
+        logger.info(
+            "Database Ready"
+        )
+
         repo = ConfigRepository(
             self.db
         )
@@ -109,16 +120,8 @@ class HWKStockApp(MDApp):
         
 
         # ================================================
-        # Create Tables
+        # Initialize CountStock Database
         # ================================================
-        init_database(
-            self.db
-        )
-
-        logger.info(
-            "Database Ready"
-        )
-
         init_countstock_db()
 
         # ================================================
