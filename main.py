@@ -10,7 +10,7 @@ Application Entry Point
 from pathlib import Path
 
 from kivy.core.text import LabelBase
-from kivy.core.window import Window
+from kivy.core.window import Window, platform
 
 from app import HWKStockApp
 
