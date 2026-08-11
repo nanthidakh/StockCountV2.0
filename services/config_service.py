@@ -9,6 +9,8 @@ Download Application Configuration
 
 import requests
 
+from utils.http_json import decode_json_response, decode_response_text, JsonResponseError
+
 
 class ConfigServiceError(Exception):
     """
@@ -105,19 +107,11 @@ class ConfigService:
         # =================================================
 
         try:
-            data = response.json()
-
-        except ValueError as exc:
-            response_text = str(
-                response.text or ""
-            ).strip()
-
+            data = decode_json_response(response, require_object=True)
+        except JsonResponseError as exc:
+            response_text = decode_response_text(response).strip()
             if len(response_text) > 500:
-                response_text = (
-                    response_text[:500] +
-                    "..."
-                )
-
+                response_text = response_text[:500] + "..."
             raise ConfigServiceError(
                 "Server ไม่ได้ส่ง Config JSON ที่ถูกต้อง\n"
                 f"URL: {url}\n"

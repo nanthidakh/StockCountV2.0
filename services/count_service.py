@@ -55,8 +55,15 @@ class CountService:
             return {"status": "ITEM_NOT_FOUND"}
         detail = self.count_repo.get_plan_detail(plan_id, item["item_id"], location_id)
         if not detail:
+            any_detail = self.count_repo.get_plan_detail_any_location(plan_id, item["item_id"])
+            if any_detail:
+                return {"status": "WRONG_LOCATION", "item": item, "detail": any_detail}
             return {"status": "UNEXPECTED_ITEM", "item": item}
         return {"status": "READY", "item": item, "detail": detail}
+
+    def create_local_plan_detail(self, plan_id, item_id, location_id):
+        detail_id = self.count_repo.create_local_plan_detail(plan_id, item_id, location_id)
+        return self.count_repo.get_plan_detail(plan_id, item_id, location_id)
 
     def save_count(self, plan_id, plan_detail_id, item_id, location_id, barcode, qty, checker):
         try:

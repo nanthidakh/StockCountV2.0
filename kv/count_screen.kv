@@ -133,6 +133,15 @@
                             text_size: self.size
                             shorten: True
 
+                        MDRaisedButton:
+                            id: btn_change_location
+                            text: "เปลี่ยน"
+                            font_name: "ThaiFont"
+                            size_hint_x: None
+                            width: "82dp"
+                            disabled: True
+                            on_release: root.toggle_change_location()
+
                     MDTextField:
                         id: txt_checker
                         readonly: True
@@ -144,7 +153,7 @@
 
                     MDTextField:
                         id: txt_barcode
-                        hint_text: "ยิง Location / Barcode สินค้า"
+                        hint_text: "ยิง Location"
                         font_name: "ThaiFont"
                         multiline: False
                         size_hint_y: None
@@ -210,15 +219,6 @@
                             disabled: True
                             on_release: root.save_current_item()
 
-                        MDRaisedButton:
-                            id: btn_change_location
-                            text: "เปลี่ยน LOC"
-                            font_name: "ThaiFont"
-                            theme_text_color: "Custom"
-                            text_color: 1, 1, 1, 1
-                            md_bg_color: 0.95, 0.62, 0.05, 1
-                            disabled: True
-                            on_release: root.reset_location()
 
                     Widget:
 

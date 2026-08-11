@@ -4,6 +4,7 @@ import threading
 import requests
 from functools import partial
 from kivy.app import App
+from kivy.utils import platform
 from kivy.clock import Clock
 from kivy.factory import Factory
 from kivy.properties import BooleanProperty
@@ -66,9 +67,14 @@ class CountStockConfigScreen(CountStockBaseScreen):
             response = requests.get(f"http://{iis_ip}{API_ROOT}/get_config.ashx", timeout=20)
             response.raise_for_status()
             data = response.json()
-            if not isinstance(data, list) or not data:
+            if not isinstance(data, dict):
+                raise ValueError("รูปแบบ config.ashx ไม่ถูกต้อง")
+            branches = data.get("branches") or []
+            staff_list = data.get("staff_list") or []
+            if not branches:
                 raise ValueError("config.ashx ไม่ส่งรายการสาขา")
-            Clock.schedule_once(lambda _dt: self._show_branches(data))
+            database.replace_staff(staff_list)
+            Clock.schedule_once(lambda _dt: self._show_branches(branches))
         except Exception as exc:
             Clock.schedule_once(lambda _dt, e=str(exc): self._fetch_failed(e))
 
@@ -113,7 +119,7 @@ class CountStockImportScreen(CountStockBaseScreen):
         stats = database.get_product_stats()
         self.ids.lbl_sqlite_count.text = (
             f"ข้อมูลใน SQLite\n"
-            f"สินค้า {stats['product_count']:,} รายการ | "
+            f"สินค้า {stats['product_count']:,} รายการ\n"
             f"บาร์โค้ด {stats['barcode_count']:,} รายการ"
         )
 
@@ -159,7 +165,11 @@ class CountStockScanScreen(CountStockBaseScreen):
     location_locked = BooleanProperty(False)
     _dialog = None
 
+    staff_menu = None
+    selected_staff = ""
+
     def on_enter(self, *args):
+        self._load_staff_dropdown()
         self.refresh_recent()
         self._update_location_lock_ui()
         Clock.schedule_once(lambda _dt: self._focus_barcode(), .2)
@@ -169,15 +179,15 @@ class CountStockScanScreen(CountStockBaseScreen):
         self.manager.current = "countstock_menu"
 
     def prepare_field(self, widget, touch, clear_value=True):
-        """Prepare staff/barcode input without toggling focus off and on."""
+        """แตะช่องแล้วเตรียมรับค่าจาก Scanner โดยไม่สลับ Focus ไปมา."""
         if not widget.collide_point(*touch.pos):
             return False
         if getattr(touch, "is_mouse_scrolling", False):
             return False
+
         if clear_value:
             widget.text = ""
-        widget.focus = True
-        Clock.schedule_once(lambda _dt: widget.select_all(), 0)
+        self._keep_focus(widget)
         return False
 
     def prepare_location_field(self, widget, touch):
@@ -185,14 +195,38 @@ class CountStockScanScreen(CountStockBaseScreen):
             return False
         if getattr(touch, "is_mouse_scrolling", False):
             return False
+
         if self.location_locked:
             self.ids.lbl_result.text = "Location ถูกล็อก กด 'ปลดล็อก LOC' ก่อนเปลี่ยน"
             self._focus_barcode()
             return True
+
         widget.text = ""
-        widget.focus = True
-        Clock.schedule_once(lambda _dt: widget.select_all(), 0)
+        self._keep_focus(widget)
         return False
+
+    def _keep_focus(self, widget):
+        """คง Focus และซ่อน Soft Keyboard แต่ยังรับ Hardware Scanner ได้."""
+        if not widget.focus:
+            widget.focus = True
+        Clock.schedule_once(lambda _dt: self._hide_android_keyboard(), 0.05)
+
+    @staticmethod
+    def _hide_android_keyboard():
+        if platform != "android":
+            return
+        try:
+            from jnius import autoclass
+
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            Context = autoclass("android.content.Context")
+            activity = PythonActivity.mActivity
+            imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE)
+            view = activity.getWindow().getDecorView()
+            imm.hideSoftInputFromWindow(view.getWindowToken(), 0)
+        except Exception:
+            # การซ่อน keyboard ต้องไม่ทำให้หน้าสแกนหยุดทำงาน
+            pass
 
     def toggle_location_lock(self):
         location = self.ids.txt_location.text.strip()
@@ -220,7 +254,33 @@ class CountStockScanScreen(CountStockBaseScreen):
         if "txt_location" in self.ids:
             self.ids.txt_location.readonly = self.location_locked
 
-    def on_staff_validate(self):
+    def _load_staff_dropdown(self):
+        staff_list = database.get_staff_list()
+        if self.selected_staff not in staff_list:
+            self.selected_staff = ""
+        if "btn_staff" in self.ids:
+            self.ids.btn_staff.text = self.selected_staff or "เลือก Staff"
+
+    def open_staff_menu(self):
+        staff_list = database.get_staff_list()
+        if not staff_list:
+            self.show_error("ไม่พบ Staff กรุณาโหลด Config ใหม่")
+            return
+        items = [{
+            "text": code,
+            "viewclass": "OneLineListItem",
+            "on_release": lambda code=code: self.select_staff(code),
+        } for code in staff_list]
+        self.staff_menu = MDDropdownMenu(
+            caller=self.ids.btn_staff, items=items, width_mult=2
+        )
+        self.staff_menu.open()
+
+    def select_staff(self, code):
+        self.selected_staff = str(code)
+        self.ids.btn_staff.text = self.selected_staff
+        if self.staff_menu:
+            self.staff_menu.dismiss()
         if self.location_locked:
             self._focus_barcode()
         else:
@@ -242,12 +302,12 @@ class CountStockScanScreen(CountStockBaseScreen):
             return
 
         self.ids.txt_barcode.text = ""
-        staff = self.ids.txt_staff.text.strip()
+        staff = self.selected_staff.strip()
         location = self.ids.txt_location.text.strip()
 
         if not staff:
-            self.show_error("กรุณากรอกผู้เก็บข้อมูล")
-            self._focus_staff(clear_value=True)
+            self.show_error("กรุณาเลือก Staff")
+            self.open_staff_menu()
             return
         if not location:
             self.location_locked = False
@@ -279,11 +339,11 @@ class CountStockScanScreen(CountStockBaseScreen):
         self._focus_barcode()
 
     def _focus_staff(self, clear_value=False):
-        widget = self.ids.txt_staff
+        # Staff ใช้ Dropdown แล้ว ไม่รับการพิมพ์จาก Scanner
         if clear_value:
-            widget.text = ""
-        widget.focus = True
-        Clock.schedule_once(lambda _dt: widget.select_all(), 0)
+            self.selected_staff = ""
+            if "btn_staff" in self.ids:
+                self.ids.btn_staff.text = "เลือก Staff"
 
     def _focus_location(self, clear_value=False):
         if self.location_locked:
@@ -292,13 +352,12 @@ class CountStockScanScreen(CountStockBaseScreen):
         widget = self.ids.txt_location
         if clear_value:
             widget.text = ""
-        widget.focus = True
-        Clock.schedule_once(lambda _dt: widget.select_all(), 0)
+        self._keep_focus(widget)
 
     def _focus_barcode(self):
         widget = self.ids.txt_barcode
         widget.text = ""
-        widget.focus = True
+        self._keep_focus(widget)
 
     def refresh_recent(self):
         self.ids.recent_list.clear_widgets()
@@ -319,19 +378,18 @@ class CountStockScanScreen(CountStockBaseScreen):
             box = MDBoxLayout(
                 orientation="horizontal",
                 size_hint_y=None,
-                height="78dp",
-                spacing="4dp",
-                padding=("4dp", "2dp"),
+                height="52dp",
+                spacing="2dp",
+                padding=("2dp", "1dp"),
             )
             detail = MDLabel(
                 text=(
                     f"{row.get('location', '-')} | "
-                    f"{row.get('product_code', '-')}\n"
-                    f"{product_name}\n"
-                    f"Qty: {row.get('qty', 0)}"
+                    f"{row.get('product_code', '-')}:"
+                    f"{product_name} Qty : {row.get('qty', 0)}\n"
                 ),
                 font_name="ThaiFont",
-                font_size="14sp",
+                font_size="9sp",
                 halign="left",
                 valign="middle",
                 text_size=(self.width, None),
@@ -343,9 +401,9 @@ class CountStockScanScreen(CountStockBaseScreen):
             edit_button = MDFlatButton(
                 text="แก้ LOC",
                 font_name="ThaiFont",
-                font_size="14sp",
+                font_size="13sp",
                 size_hint_x=None,
-                width="72dp",
+                width="56dp",
                 disabled=locked,
             )
             edit_button.bind(on_release=partial(self.open_edit_location, dict(row)))
@@ -354,9 +412,9 @@ class CountStockScanScreen(CountStockBaseScreen):
             delete_button = MDFlatButton(
                 text="ลบ",
                 font_name="ThaiFont",
-                font_size="14sp",
+                font_size="13sp",
                 size_hint_x=None,
-                width="48dp",
+                width="36dp",
                 disabled=locked,
             )
             delete_button.bind(on_release=partial(self.confirm_delete, dict(row)))
@@ -469,46 +527,32 @@ class CountStockExportScreen(CountStockBaseScreen):
             f"scan_data {stats['scan_data_count']:,} | "
             f"scan_slottag {stats['slottag_count']:,}"
         )
-        has_target = bool(
-            self.ids.chk_scan_data.active
-            or self.ids.chk_scan_slottag.active
-        )
-        self.ids.btn_export_selected.disabled = (
-            self.exporting or not has_target or stats["total_count"] <= 0
-        )
+        # ปุ่มทั้งสองใช้ได้เมื่อมีข้อมูลชุดใหม่ที่ยังไม่ Export ไปปลายทางใดเลย
+        disabled = self.exporting or stats["pending_count"] <= 0
+        self.ids.btn_export_scan_data.disabled = disabled
+        self.ids.btn_export_slottag.disabled = disabled
 
-    def on_target_changed(self):
-        if "btn_export_selected" not in self.ids:
-            return
-        self.refresh_stats()
-
-    def export_selected(self):
+    def export_to(self, table_name):
         if self.exporting:
             return
-        selected = []
-        if self.ids.chk_scan_data.active:
-            selected.append(self.TARGETS[0])
-        if self.ids.chk_scan_slottag.active:
-            selected.append(self.TARGETS[1])
-        if not selected:
-            self.show_error("กรุณาเลือกอย่างน้อย 1 ตาราง")
+        target = next((x for x in self.TARGETS if x[0] == table_name), None)
+        if not target:
+            self.show_error("ตาราง Export ไม่ถูกต้อง")
             return
-
-        jobs = []
-        for table_name, display_name in selected:
-            rows = database.export_rows(table_name)
-            if rows:
-                jobs.append((table_name, display_name, rows))
-
-        if not jobs:
-            self.show_error("ข้อมูลทั้งหมด Sync ไปยังตารางที่เลือกแล้ว")
+        rows = database.export_rows(table_name)
+        if not rows:
+            self.show_error("ไม่มีข้อมูลชุดใหม่สำหรับ Export")
             self.refresh_stats()
             return
 
+        # ล็อกทั้งสองปุ่มทันที: ข้อมูลชุดนี้เลือก Export ได้เพียงอย่างเดียว
         self.exporting = True
         self.refresh_stats()
-        total_jobs = sum(len(rows) for _, _, rows in jobs)
-        self.ids.lbl_status.text = f"กำลัง Sync {len(jobs)} ตาราง รวม {total_jobs:,} รายการ..."
+        display_name = target[1]
+        self.ids.lbl_status.text = (
+            f"กำลัง Sync {display_name} {len(rows):,} รายการ..."
+        )
+        jobs = [(table_name, display_name, rows)]
         threading.Thread(target=self._worker, args=(jobs,), daemon=True).start()
 
     def _worker(self, jobs):
@@ -585,4 +629,3 @@ class CountStockExportScreen(CountStockBaseScreen):
         self.ids.lbl_status.text = "ล้างข้อมูลแล้ว"
         self.refresh_stats()
         self.show_success("ล้างรายการ CountStock ในเครื่องแล้ว")
-

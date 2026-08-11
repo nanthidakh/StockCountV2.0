@@ -14,6 +14,7 @@ import requests
 
 
 from utils.logger import logger
+from utils.http_json import decode_json_response, build_server_error
 
 
 
@@ -87,11 +88,10 @@ class APIClient:
 
 
 
-            response.raise_for_status()
-
-
-
-            return response.json()
+            data = decode_json_response(response, require_object=True)
+            if response.status_code >= 400:
+                raise RuntimeError(build_server_error(data, f"HTTP {response.status_code}"))
+            return data
 
 
 
@@ -158,11 +158,10 @@ class APIClient:
 
 
 
-            response.raise_for_status()
-
-
-
-            return response.json()
+            data = decode_json_response(response, require_object=True)
+            if response.status_code >= 400:
+                raise RuntimeError(build_server_error(data, f"HTTP {response.status_code}"))
+            return data
 
 
 

@@ -134,6 +134,15 @@
                             text_size: self.size
                             shorten: True
 
+                        MDRaisedButton:
+                            id: btn_change_location
+                            text: "เปลี่ยน"
+                            font_name: "ThaiFont"
+                            size_hint_x: None
+                            width: "82dp"
+                            disabled: True
+                            on_release: root.toggle_change_location()
+
                     MDTextField:
                         id: txt_checker
                         readonly: True
@@ -145,7 +154,7 @@
 
                     MDTextField:
                         id: txt_barcode
-                        hint_text: "ยิง Location / Barcode / รหัสสินค้า"
+                        hint_text: "ยิง Location"
                         font_name: "ThaiFont"
                         multiline: False
                         size_hint_y: None
@@ -211,15 +220,6 @@
                             disabled: True
                             on_release: root.save_current_item()
 
-                        MDRaisedButton:
-                            id: btn_change_location
-                            text: "เปลี่ยน LOC"
-                            font_name: "ThaiFont"
-                            theme_text_color: "Custom"
-                            text_color: 1, 1, 1, 1
-                            md_bg_color: 0.16, 0.58, 0.28, 1
-                            disabled: True
-                            on_release: root.reset_location()
 
                     Widget:
 
@@ -379,9 +379,9 @@
                         font_size: "14sp"
                         halign: "center"
                         valign: "middle"
-                        text_size: self.size
+                        text_size: self.width, None
                         size_hint_y: None
-                        height: "36dp"
+                        height: min(max(self.texture_size[1] + dp(10), dp(44)), dp(96))
 
                     MDRaisedButton:
                         id: btn_sync_now

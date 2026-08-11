@@ -20,53 +20,7 @@ class SyncRepository:
 
     def __init__(self, db):
         self.db = db
-        self.ensure_schema()
 
-    def ensure_schema(self):
-        connection = self.db.get_connection()
-        try:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_config
-                (
-                    config_key TEXT PRIMARY KEY,
-                    config_value TEXT
-                )
-                """
-            )
-            columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(tb_sync_queue)")
-            }
-            additions = {
-                "transaction_type": "TEXT",
-                "source_table": "TEXT",
-                "source_id": "INTEGER",
-                "last_attempt_at": "TEXT",
-                "synced_at": "TEXT",
-                "created_at": "TEXT",
-                "sync_batch_guid": "TEXT",
-            }
-            for name, definition in additions.items():
-                if name not in columns:
-                    connection.execute(
-                        f"ALTER TABLE tb_sync_queue ADD COLUMN {name} {definition}"
-                    )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS ix_sync_queue_plan_status
-                ON tb_sync_queue(plan_id, sync_status, queue_id)
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS ix_sync_queue_batch
-                ON tb_sync_queue(plan_id, sync_batch_guid, queue_id)
-                """
-            )
-            connection.commit()
-        finally:
-            connection.close()
 
     def get_or_create_device_id(self):
         connection = self.db.get_connection()
@@ -266,11 +220,11 @@ class SyncRepository:
         ):
             operation_type = str(payload["operation_type"]).upper()
 
+        # Reference ต้องถูกกำหนดโดย Business Logic เท่านั้น
+        # ห้ามเดาจาก History เพราะอาจอ้างตัวเองหรืออ้าง Local GUID ที่ Server ไม่รู้จัก
         reference_guid = payload.get("reference_transaction_guid")
-        if not reference_guid and operation_type != "INSERT":
-            reference_guid = self._find_history_guid(
-                payload.get("history_id") or queue_row.get("source_id")
-            )
+        if operation_type == "INSERT":
+            reference_guid = None
 
         location_id = payload.get("location_id")
         try:
@@ -345,21 +299,15 @@ class SyncRepository:
             (detail_id, tx_type),
         ).fetchone()["total"]
         status = "PENDING" if int(pending or 0) > 0 else "SYNCED"
-        columns = {r["name"] for r in connection.execute("PRAGMA table_info(tb_plan_detail)")}
-        assignments, values = [], []
         target = "audit_sync_status" if tx_type == "AUDIT" else "count_sync_status"
-        if target in columns:
-            assignments.append(f"{target}=?")
-            values.append(status)
-        if "local_sync_status" in columns:
-            assignments.append("local_sync_status=?")
-            values.append(status)
-        if assignments:
-            values.append(detail_id)
-            connection.execute(
-                f"UPDATE tb_plan_detail SET {', '.join(assignments)} WHERE plan_detail_id=?",
-                tuple(values),
-            )
+        connection.execute(
+            f"""
+            UPDATE tb_plan_detail
+            SET {target}=?, local_sync_status=?
+            WHERE plan_detail_id=?
+            """,
+            (status, status, detail_id),
+        )
 
     def _update_many(self, guids, set_sql, prefix_values=()):
         if not guids:

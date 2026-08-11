@@ -167,8 +167,6 @@ class DownloadRepository:
         with self._connection() as connection:
             try:
 
-                self._ensure_schema(connection)
-
                 connection.execute("BEGIN IMMEDIATE")
 
                 if mode == DOWNLOAD_MODE_INITIAL:
@@ -211,6 +209,8 @@ class DownloadRepository:
                         connection,
                         package["details"],
                     )
+
+                self._resolve_detail_locations(connection, plan_id)
 
                 self._save_download_metadata(
                     connection,
@@ -315,8 +315,7 @@ class DownloadRepository:
         """
         ป้องกัน Initial Download ลบข้อมูล Local ที่ยังไม่ได้ Sync
 
-        รองรับ SQLite รุ่นเก่าที่ tb_sync_queue
-        อาจยังไม่มี column plan_id
+        ใช้ Clean Schema ซึ่งมี tb_sync_queue.plan_id เสมอ
         """
 
         plan_id = self._to_int(
@@ -327,21 +326,6 @@ class DownloadRepository:
             raise DownloadRepositoryError(
                 "Plan ID สำหรับตรวจสอบข้อมูลรอ Sync ไม่ถูกต้อง"
             )
-
-        # ตารางยังไม่มี ไม่ต้องตรวจ Queue
-        if not self._table_exists(
-            connection,
-            "tb_sync_queue",
-        ):
-            return
-
-        # SQLite รุ่นเก่ายังไม่มี plan_id
-        if not self._column_exists(
-            connection,
-            "tb_sync_queue",
-            "plan_id",
-        ):
-            return
 
         pending_count = connection.execute(
             """
@@ -656,110 +640,10 @@ class DownloadRepository:
     # =====================================================
     # audit_history
     # =====================================================   
-    def _create_tb_audit_history(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        เก็บประวัติการ Audit ทุกครั้ง
-
-        qty_audit ใน tb_plan_detail จะเก็บค่าปัจจุบันล่าสุด
-        ส่วนตารางนี้เก็บประวัติการตรวจสอบทุกครั้ง
-        """
-
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_audit_history
-            (
-                audit_history_id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                transaction_guid TEXT NOT NULL UNIQUE,
-
-                plan_id INTEGER NOT NULL,
-                plan_detail_id INTEGER NOT NULL,
-                item_id INTEGER NOT NULL,
-
-                qty REAL,
-                old_qty_audit REAL,
-                new_qty_audit REAL NOT NULL,
-
-                audit_round INTEGER NOT NULL DEFAULT 1,
-
-                audit_staff TEXT,
-                audit_user TEXT,
-                device_name TEXT,
-
-                is_same_qty INTEGER NOT NULL DEFAULT 0,
-                is_confirmed INTEGER NOT NULL DEFAULT 1,
-
-                audit_date TEXT NOT NULL,
-
-                sync_status TEXT NOT NULL DEFAULT 'PENDING',
-                sync_attempt INTEGER NOT NULL DEFAULT 0,
-
-                synced_at TEXT,
-                sync_error TEXT,
-
-                created_at TEXT NOT NULL,
-
-                FOREIGN KEY
-                (
-                    plan_detail_id
-                )
-                REFERENCES tb_plan_detail
-                (
-                    plan_detail_id
-                )
-            )
-            """
-    )        
     
     # =====================================================
     # create_tb_audit_history
     # =====================================================
-    def _create_tb_sync_queue(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        Queue กลางสำหรับส่งข้อมูลกลับ Server
-
-        รองรับ:
-        - Count
-        - Audit
-        - Audit ซ้ำ
-        - Retry
-        - Partial Success
-        """
-
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_sync_queue
-            (
-                sync_queue_id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                transaction_guid TEXT NOT NULL UNIQUE,
-
-                plan_id INTEGER NOT NULL,
-                plan_detail_id INTEGER,
-
-                sync_type TEXT NOT NULL,
-
-                source_table TEXT NOT NULL,
-                source_id INTEGER NOT NULL,
-
-                sync_status TEXT NOT NULL DEFAULT 'PENDING',
-
-                retry_count INTEGER NOT NULL DEFAULT 0,
-
-                created_at TEXT NOT NULL,
-                last_attempt_at TEXT,
-                synced_at TEXT,
-
-                error_message TEXT
-            )
-            """
-        )
         
     
     # =====================================================
@@ -779,1030 +663,41 @@ class DownloadRepository:
         # =====================================================
     # Ensure SQLite Schema
     # =====================================================
-    def _ensure_schema(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        สร้างและปรับปรุงตารางที่ใช้ใน Download Module
-        ต้องทำก่อน BEGIN IMMEDIATE เพราะส่วน Schema
-        จะ Commit แยกให้เรียบร้อยก่อนเริ่ม Transaction บันทึกข้อมูล
-        """
-        self._create_tb_plan(connection)
-        self._create_tb_item(connection)
-        self._create_tb_barcode(connection)
-        self._create_tb_location(connection)
-        self._create_tb_plan_detail(connection)
-        self._create_tb_download_log(connection)
-
-        self._create_tb_audit_history(connection)
-        self._create_tb_sync_queue(connection)
-
-        # เพิ่ม Column ให้ฐานข้อมูลเก่า
-        self._upgrade_schema(connection)
-
-        # ต้องสร้าง Index หลัง Upgrade
-        self._create_indexes(connection)
-        connection.commit()
     # =====================================================
     # Table: tb_plan
     # =====================================================
-    def _create_tb_plan(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        ข้อมูลหัว Plan ที่ Download มาจาก SQL Server
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_plan
-            (
-                plan_id INTEGER NOT NULL,
-                plan_code TEXT,
-                plan_details TEXT,
-                plan_check_date TEXT,
-                plan_status TEXT,
-                udf1 TEXT,
-                udf2 TEXT,
-                udf3 TEXT,
-                create_date TEXT,
-                create_by INTEGER,
-                update_date TEXT,
-                update_by INTEGER,
-                is_export INTEGER NOT NULL DEFAULT 0,
-                download_date TEXT,
-                local_status TEXT NOT NULL DEFAULT 'DOWNLOADED',
-                PRIMARY KEY
-                (
-                    plan_id
-                )
-            )
-            """
-        )
     # =====================================================
     # Table: tb_item
     # =====================================================
-    def _create_tb_item(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        Master Item สำหรับใช้งานบน Android
-        item_id คือ Master Item ID
-        ที่ Server รวมตาม item_code แล้ว
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_item
-            (
-                item_id INTEGER NOT NULL,
-                item_code TEXT NOT NULL,
-                item_name TEXT,
-                category TEXT,
-                unit_rate REAL NOT NULL DEFAULT 0,
-                qty REAL NOT NULL DEFAULT 0,
-                uom TEXT,
-                unit_cost REAL NOT NULL DEFAULT 0,
-                batching_unit TEXT,
-                batching_factor REAL NOT NULL DEFAULT 0,
-                is_active INTEGER NOT NULL DEFAULT 0,
-                downloaded_at TEXT,
-                updated_at TEXT,
-                PRIMARY KEY
-                (
-                    item_id
-                )
-            )
-            """
-        )
     # =====================================================
     # Table: tb_barcode
     # =====================================================
-    def _create_tb_barcode(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        Barcode ทุกตัวของสินค้า
-        รวมถึง item_code ที่ Server ส่งมาเป็น Barcode
-        เพื่อให้ค้นหาด้วยรหัสสินค้าได้
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_barcode
-            (
-                barcode_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER NOT NULL,
-                barcode TEXT NOT NULL,
-                downloaded_at TEXT,
-                FOREIGN KEY
-                (
-                    item_id
-                )
-                REFERENCES tb_item
-                (
-                    item_id
-                )
-                ON UPDATE CASCADE
-                ON DELETE CASCADE,
-                UNIQUE
-                (
-                    item_id,
-                    barcode
-                )
-            )
-            """
-        )
     # =====================================================
     # Table: tb_location
     # =====================================================
-    def _create_tb_location(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        Location แยกตาม Plan
-        location_id จาก Server เริ่มนับใหม่ในแต่ละ Plan
-        จึงใช้ Primary Key แบบ plan_id + location_id
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_location
-            (
-                plan_id INTEGER NOT NULL,
-                location_id INTEGER NOT NULL,
-                location_code TEXT NOT NULL,
-                location_name TEXT,
-                downloaded_at TEXT,
-                PRIMARY KEY
-                (
-                    plan_id,
-                    location_id
-                ),
-                UNIQUE
-                (
-                    plan_id,
-                    location_code
-                ),
-                FOREIGN KEY
-                (
-                    plan_id
-                )
-                REFERENCES tb_plan
-                (
-                    plan_id
-                )
-                ON UPDATE CASCADE
-                ON DELETE CASCADE
-            )
-            """
-        )
     # =====================================================
     # Table: tb_plan_detail
     # =====================================================
-    def _create_tb_plan_detail(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        รายละเอียด Plan
-        item_id:
-            Master Item ID ที่ Android ใช้ค้นหา
-        source_item_id:
-            Item ID เดิมจาก SQL Server
-            เก็บไว้ใช้ตอน Sync กลับ Server
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_plan_detail
-            (
-                plan_detail_id INTEGER NOT NULL,
-                plan_id INTEGER NOT NULL,
-                item_id INTEGER NOT NULL,
-                source_item_id INTEGER NOT NULL,
-                new_zone TEXT,
-                before_zone TEXT,
-                new_location TEXT,
-                before_location TEXT,
-                qty REAL NOT NULL DEFAULT 0,
-                qty_on_hand REAL NOT NULL DEFAULT 0,
-                qty_audit REAL NOT NULL DEFAULT 0,
-                check_date TEXT,
-                checker TEXT,
-                auditor TEXT,
-                status_id INTEGER,
-                remark TEXT,
-                barcode TEXT,
-                udf1 TEXT,
-                udf2 TEXT,
-                udf3 TEXT,
-                audit_count INTEGER NOT NULL DEFAULT 0,
-                create_date TEXT,
-                create_by INTEGER,
-                update_date TEXT,
-                update_by INTEGER,
-                is_confirm INTEGER NOT NULL DEFAULT 0,
-                is_change_location INTEGER NOT NULL DEFAULT 0,
-                is_check INTEGER NOT NULL DEFAULT 0,
-                local_is_changed INTEGER NOT NULL DEFAULT 0,
-                local_sync_status TEXT NOT NULL DEFAULT 'PENDING',
-                local_updated_at TEXT,
-                PRIMARY KEY
-                (
-                    plan_detail_id
-                ),
-                FOREIGN KEY
-                (
-                    plan_id
-                )
-                REFERENCES tb_plan
-                (
-                    plan_id
-                )
-                ON UPDATE CASCADE
-                ON DELETE CASCADE,
-                FOREIGN KEY
-                (
-                    item_id
-                )
-                REFERENCES tb_item
-                (
-                    item_id
-                )
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT
-            )
-            """
-        )
     # =====================================================
     # Table: tb_download_log
     # =====================================================
-    def _create_tb_download_log(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        เก็บประวัติการ Download ล่าสุดของแต่ละ Plan
-        """
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tb_download_log
-            (
-                download_log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plan_id INTEGER NOT NULL,
-                download_date TEXT NOT NULL,
-                status TEXT NOT NULL,
-                item_count INTEGER NOT NULL DEFAULT 0,
-                barcode_count INTEGER NOT NULL DEFAULT 0,
-                location_count INTEGER NOT NULL DEFAULT 0,
-                detail_count INTEGER NOT NULL DEFAULT 0,
-                error_message TEXT,
-                FOREIGN KEY
-                (
-                    plan_id
-                )
-                REFERENCES tb_plan
-                (
-                    plan_id
-                )
-                ON UPDATE CASCADE
-                ON DELETE CASCADE
-            )
-            """
-        )
     # =====================================================
     # Upgrade Existing Schema
     # =====================================================
-    def _upgrade_schema(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        เพิ่ม Column ที่อาจไม่มีใน Database รุ่นเดิม
-        SQLite ไม่รองรับ ADD COLUMN หลาย Column พร้อมกัน
-        จึงตรวจและเพิ่มทีละ Column
-        """
-        # -------------------------------------------------
-        # tb_plan
-        # -------------------------------------------------
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="plan_details",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="plan_check_date",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="plan_status",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="udf1",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="udf2",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="udf3",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="create_date",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="create_by",
-            column_definition="INTEGER",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="update_date",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="update_by",
-            column_definition="INTEGER",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="is_export",
-            column_definition=(
-                "INTEGER NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="download_date",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_plan",
-            column_name="local_status",
-            column_definition=(
-                "TEXT NOT NULL DEFAULT 'DOWNLOADED'"
-            ),
-        )
-        # -------------------------------------------------
-        # tb_item
-        # -------------------------------------------------
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="category",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="unit_rate",
-            column_definition=(
-                "REAL NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="qty",
-            column_definition=(
-                "REAL NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="uom",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="unit_cost",
-            column_definition=(
-                "REAL NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="batching_unit",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="batching_factor",
-            column_definition=(
-                "REAL NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="is_active",
-            column_definition=(
-                "INTEGER NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="downloaded_at",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_item",
-            column_name="updated_at",
-            column_definition="TEXT",
-        )
-        # -------------------------------------------------
-        # tb_barcode
-        # -------------------------------------------------
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_barcode",
-            column_name="downloaded_at",
-            column_definition="TEXT",
-        )
-        # -------------------------------------------------
-        # tb_location
-        # -------------------------------------------------
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_location",
-            column_name="plan_id",
-            column_definition=(
-                "INTEGER NOT NULL DEFAULT 0"
-            ),
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_location",
-            column_name="location_name",
-            column_definition="TEXT",
-        )
-        self._add_column_if_missing(
-            connection,
-            table_name="tb_location",
-            column_name="downloaded_at",
-            column_definition="TEXT",
-        )
-        # -------------------------------------------------
-        # tb_plan_detail
-        # -------------------------------------------------
-        plan_detail_columns = [
-            (
-                "source_item_id",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "new_zone",
-                "TEXT",
-            ),
-            (
-                "before_zone",
-                "TEXT",
-            ),
-            (
-                "new_location",
-                "TEXT",
-            ),
-            (
-                "before_location",
-                "TEXT",
-            ),
-            (
-                "qty",
-                "REAL NOT NULL DEFAULT 0",
-            ),
-            (
-                "qty_on_hand",
-                "REAL NOT NULL DEFAULT 0",
-            ),
-            (
-                "qty_audit",
-                "REAL NOT NULL DEFAULT 0",
-            ),
-            (
-                "check_date",
-                "TEXT",
-            ),
-            (
-                "checker",
-                "TEXT",
-            ),
-            (
-                "auditor",
-                "TEXT",
-            ),
-            (
-                "status_id",
-                "INTEGER",
-            ),
-            (
-                "remark",
-                "TEXT",
-            ),
-            (
-                "barcode",
-                "TEXT",
-            ),
-            (
-                "udf1",
-                "TEXT",
-            ),
-            (
-                "udf2",
-                "TEXT",
-            ),
-            (
-                "udf3",
-                "TEXT",
-            ),
-            (
-                "audit_count",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "create_date",
-                "TEXT",
-            ),
-            (
-                "create_by",
-                "INTEGER",
-            ),
-            (
-                "update_date",
-                "TEXT",
-            ),
-            (
-                "update_by",
-                "INTEGER",
-            ),
-            (
-                "is_confirm",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "is_change_location",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "is_check",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "local_is_changed",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "local_sync_status",
-                "TEXT NOT NULL DEFAULT 'PENDING'",
-            ),
-            (
-                "local_updated_at",
-                "TEXT",
-            ),
-        ]
-        for (
-            column_name,
-            column_definition,
-        ) in plan_detail_columns:
-            self._add_column_if_missing(
-                connection,
-                table_name="tb_plan_detail",
-                column_name=column_name,
-                column_definition=column_definition,
-            )
-        # -------------------------------------------------
-        # tb_plan_detail: Count / Audit / Server state
-        # -------------------------------------------------
-        detail_state_columns = [
-            ("count_sync_status", "TEXT NOT NULL DEFAULT 'NONE'"),
-            ("count_modified_at", "TEXT"),
-            ("count_transaction_guid", "TEXT"),
-            ("audit_sync_status", "TEXT NOT NULL DEFAULT 'NONE'"),
-            ("audit_modified_at", "TEXT"),
-            ("audit_transaction_guid", "TEXT"),
-            ("audit_user", "TEXT"),
-            ("audit_date", "TEXT"),
-            ("audit_round", "INTEGER NOT NULL DEFAULT 0"),
-            ("server_updated_at", "TEXT"),
-            ("downloaded_at", "TEXT"),
-        ]
-        for column_name, column_definition in detail_state_columns:
-            self._add_column_if_missing(
-                connection,
-                table_name="tb_plan_detail",
-                column_name=column_name,
-                column_definition=column_definition,
-            )
-
-        # -------------------------------------------------
-        # tb_audit_history
-        # -------------------------------------------------
-        audit_history_columns = [
-            ("transaction_guid", "TEXT"),
-            ("plan_id", "INTEGER"),
-            ("plan_detail_id", "INTEGER"),
-            ("item_id", "INTEGER"),
-            ("qty", "REAL"),
-            ("old_qty_audit", "REAL"),
-            ("new_qty_audit", "REAL"),
-            ("audit_round", "INTEGER NOT NULL DEFAULT 1"),
-            ("audit_staff", "TEXT"),
-            ("audit_user", "TEXT"),
-            ("device_name", "TEXT"),
-            ("is_same_qty", "INTEGER NOT NULL DEFAULT 0"),
-            ("is_confirmed", "INTEGER NOT NULL DEFAULT 1"),
-            ("audit_date", "TEXT"),
-            ("sync_status", "TEXT NOT NULL DEFAULT 'PENDING'"),
-            ("sync_attempt", "INTEGER NOT NULL DEFAULT 0"),
-            ("synced_at", "TEXT"),
-            ("sync_error", "TEXT"),
-            ("created_at", "TEXT"),
-        ]
-        for column_name, column_definition in audit_history_columns:
-            self._add_column_if_missing(
-                connection,
-                table_name="tb_audit_history",
-                column_name=column_name,
-                column_definition=column_definition,
-            )
-
-        # -------------------------------------------------
-        # tb_sync_queue
-        # -------------------------------------------------
-        sync_queue_columns = [
-            ("transaction_guid", "TEXT"),
-            ("plan_id", "INTEGER"),
-            ("plan_detail_id", "INTEGER"),
-            ("sync_type", "TEXT"),
-            ("source_table", "TEXT"),
-            ("source_id", "INTEGER"),
-            ("sync_status", "TEXT NOT NULL DEFAULT 'PENDING'"),
-            ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
-            ("created_at", "TEXT"),
-            ("last_attempt_at", "TEXT"),
-            ("synced_at", "TEXT"),
-            ("error_message", "TEXT"),
-        ]
-        for column_name, column_definition in sync_queue_columns:
-            self._add_column_if_missing(
-                connection,
-                table_name="tb_sync_queue",
-                column_name=column_name,
-                column_definition=column_definition,
-            )
-
-        # -------------------------------------------------
-        # tb_download_log
-        # -------------------------------------------------
-        download_log_columns = [
-            (
-                "item_count",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "barcode_count",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "location_count",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "detail_count",
-                "INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "error_message",
-                "TEXT",
-            ),
-        ]
-        for (
-            column_name,
-            column_definition,
-        ) in download_log_columns:
-            self._add_column_if_missing(
-                connection,
-                table_name="tb_download_log",
-                column_name=column_name,
-                column_definition=column_definition,
-            )
     # =====================================================
     # Create Indexes
     # =====================================================
-    def _create_indexes(
-        self,
-        connection: sqlite3.Connection,
-    ) -> None:
-        """
-        Index สำหรับ Download, Count, Audit และ Sync
-        """
-
-        # =================================================
-        # Item
-        # =================================================
-
-        connection.execute(
-            """
-            DROP INDEX IF EXISTS ux_tb_item_item_code
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_item_item_code
-            ON tb_item
-            (
-                item_code
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_item_item_name
-            ON tb_item
-            (
-                item_name
-            )
-            """
-        )
-
-        # =================================================
-        # Barcode
-        # =================================================
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_barcode_barcode
-            ON tb_barcode
-            (
-                barcode
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_barcode_item_id
-            ON tb_barcode
-            (
-                item_id
-            )
-            """
-        )
-
-        # =================================================
-        # Location
-        # =================================================
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_location_plan_code
-            ON tb_location
-            (
-                plan_id,
-                location_code
-            )
-            """
-        )
-
-        # =================================================
-        # Plan Detail
-        # =================================================
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_plan_id
-            ON tb_plan_detail
-            (
-                plan_id
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_plan_item
-            ON tb_plan_detail
-            (
-                plan_id,
-                item_id
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_source_item
-            ON tb_plan_detail
-            (
-                source_item_id
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_before_location
-            ON tb_plan_detail
-            (
-                plan_id,
-                before_location
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_new_location
-            ON tb_plan_detail
-            (
-                plan_id,
-                new_location
-            )
-            """
-        )
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_sync_status
-            ON tb_plan_detail
-            (
-                plan_id,
-                local_sync_status
-            )
-            """
-        )
-
-        # =================================================
-        # Download Log
-        # =================================================
-
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_download_log_plan
-            ON tb_download_log
-            (
-                plan_id,
-                download_date
-            )
-            """
-        )
-
-        # =================================================
-        # Count / Audit / Sync
-        # =================================================
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_count_sync
-            ON tb_plan_detail (plan_id, count_sync_status)
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_plan_detail_audit_sync
-            ON tb_plan_detail (plan_id, audit_sync_status)
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_audit_history_plan
-            ON tb_audit_history (plan_id, audit_date)
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_audit_history_detail
-            ON tb_audit_history (plan_detail_id, audit_date)
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_sync_queue_plan_status
-            ON tb_sync_queue (plan_id, sync_status)
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS ix_tb_sync_queue_type_status
-            ON tb_sync_queue (sync_type, sync_status)
-            """
-        )
     # =====================================================
     # Add Column If Missing
     # =====================================================
-    def _add_column_if_missing(
-        self,
-        connection: sqlite3.Connection,
-        table_name: str,
-        column_name: str,
-        column_definition: str,
-    ) -> None:
-        """
-        เพิ่ม Column ให้ Database รุ่นเดิม
-        โดยตรวจสอบก่อนว่า Column มีอยู่แล้วหรือไม่
-        """
-        if self._column_exists(
-            connection,
-            table_name,
-            column_name,
-        ):
-            return
-        safe_table_name = self._validate_identifier(
-            table_name
-        )
-        safe_column_name = self._validate_identifier(
-            column_name
-        )
-        connection.execute(
-            f"""
-            ALTER TABLE {safe_table_name}
-            ADD COLUMN {safe_column_name}
-            {column_definition}
-            """
-        )
     # =====================================================
     # Column Exists
     # =====================================================
     # =====================================================
     # Validate SQLite Identifier
     # =====================================================
-    def _validate_identifier(
-        self,
-        value: str,
-    ) -> str:
-        """
-        ป้องกันการนำ Table หรือ Column Name
-        ที่มีอักขระไม่ถูกต้องไปสร้าง Dynamic SQL
-        """
-        value = str(
-            value or ""
-        ).strip()
-        if not value:
-            raise DownloadRepositoryError(
-                "SQLite identifier ว่าง"
-            )
-        if not value.replace(
-            "_",
-            "",
-        ).isalnum():
-            raise DownloadRepositoryError(
-                f"SQLite identifier ไม่ถูกต้อง: {value}"
-            )
-        return value
     
     
-    def _column_exists(
-        self,
-        connection: sqlite3.Connection,
-        table_name: str,
-        column_name: str,
-    ) -> bool:
-        """ตรวจสอบว่า SQLite table มี column ที่ระบุหรือไม่"""
-        if not self._table_exists(connection, table_name):
-            return False
-
-        safe_table_name = self._validate_identifier(table_name)
-        rows = connection.execute(
-            f"PRAGMA table_info({safe_table_name})"
-        ).fetchall()
-
-        expected = str(column_name or "").strip().lower()
-        for row in rows:
-            existing = row["name"] if isinstance(row, sqlite3.Row) else row[1]
-            if str(existing or "").strip().lower() == expected:
-                return True
-        return False
             
     # =====================================================
     # Delete Existing Plan Data
@@ -1812,118 +707,25 @@ class DownloadRepository:
         connection: sqlite3.Connection,
         plan_id: int,
     ) -> None:
-        """
-        ลบข้อมูลเดิมของ Plan สำหรับ INITIAL DOWNLOAD เท่านั้น
-
-        ต้องเรียก _validate_initial_download_allowed()
-        ก่อนเรียก Method นี้เสมอ
-
-        ลำดับการลบต้องเริ่มจาก Child Table
-        เพื่อป้องกัน Foreign Key Error
-        """
-
-        plan_id = self._to_int(
-            plan_id
-        )
-
+        """Delete one downloaded plan after pending-sync validation."""
+        plan_id = self._to_int(plan_id)
         if plan_id <= 0:
-            raise DownloadRepositoryError(
-                "Plan ID สำหรับลบข้อมูลเดิมไม่ถูกต้อง"
-            )
+            raise DownloadRepositoryError("Plan ID สำหรับลบข้อมูลเดิมไม่ถูกต้อง")
 
-        # =====================================================
-        # 1. Sync Queue
-        # =====================================================
-
-        if self._column_exists(
-            connection,
+        for table_name in (
             "tb_sync_queue",
-            "plan_id",
-        ):
-            connection.execute(
-                """
-                DELETE FROM tb_sync_queue
-                WHERE plan_id = ?
-                """,
-                (
-                    plan_id,
-                ),
-            )
-
-        # =====================================================
-        # 2. Audit History
-        # =====================================================
-
-        if self._column_exists(
-            connection,
             "tb_audit_history",
-            "plan_id",
+            "tbt_count_history",
+            "tb_download_log",
+            "tb_plan_detail",
+            "tb_location",
+            "tb_plan",
         ):
             connection.execute(
-                """
-                DELETE FROM tb_audit_history
-                WHERE plan_id = ?
-                """,
-                (
-                    plan_id,
-                ),
+                f"DELETE FROM {table_name} WHERE plan_id = ?",
+                (plan_id,),
             )
 
-        # =====================================================
-        # 3. Download Log
-        # =====================================================
-
-        connection.execute(
-            """
-            DELETE FROM tb_download_log
-            WHERE plan_id = ?
-            """,
-            (
-                plan_id,
-            ),
-        )
-
-        # =====================================================
-        # 4. Plan Detail
-        # =====================================================
-
-        connection.execute(
-            """
-            DELETE FROM tb_plan_detail
-            WHERE plan_id = ?
-            """,
-            (
-                plan_id,
-            ),
-        )
-
-        # =====================================================
-        # 5. Location
-        # =====================================================
-
-        connection.execute(
-            """
-            DELETE FROM tb_location
-            WHERE plan_id = ?
-            """,
-            (
-                plan_id,
-            ),
-        )
-
-        # =====================================================
-        # 6. Plan Header
-        # =====================================================
-
-        connection.execute(
-            """
-            DELETE FROM tb_plan
-            WHERE plan_id = ?
-            """,
-            (
-                plan_id,
-            ),
-        )
         
     
     # =====================================================
@@ -2387,7 +1189,7 @@ class DownloadRepository:
         - ข้อมูลมาจาก Server
         - ยังไม่มี Local Change
         - ยังไม่มีข้อมูลรอ Sync
-        - qty, qty_on_hand และ qty_audit รับค่าจาก Server
+        - qty, qty_on_hand, qty_audit และ server_qty_audit รับค่าจาก Server
         """
 
         if not details:
@@ -2417,6 +1219,8 @@ class DownloadRepository:
             source_item_id = self._to_int(
                 detail.get("source_item_id")
             )
+            item_code = self._to_text(detail.get("item_code"))
+            location_id = self._to_int(detail.get("location_id"))
 
             if plan_detail_id <= 0:
                 raise DownloadRepositoryError(
@@ -2438,6 +1242,14 @@ class DownloadRepository:
 
             if source_item_id <= 0:
                 source_item_id = item_id
+            if not item_code:
+                raise DownloadRepositoryError(
+                    f"Plan Detail แถวที่ {index:,} ไม่มี item_code"
+                )
+            if location_id <= 0:
+                raise DownloadRepositoryError(
+                    f"Plan Detail แถวที่ {index:,} ไม่มี location_id ที่ถูกต้อง"
+                )
 
             server_update_date = self._to_datetime_text(
                 detail.get("update_date")
@@ -2451,7 +1263,9 @@ class DownloadRepository:
                 {
                     "plan_detail_id": plan_detail_id,
                     "plan_id": plan_id,
+                    "item_code": item_code,
                     "item_id": item_id,
+                    "location_id": location_id,
                     "source_item_id": source_item_id,
 
                     "new_zone": self._to_text(
@@ -2474,6 +1288,9 @@ class DownloadRepository:
                         detail.get("qty_on_hand")
                     ),
                     "qty_audit": self._to_float(
+                        detail.get("qty_audit")
+                    ),
+                    "server_qty_audit": self._to_float(
                         detail.get("qty_audit")
                     ),
 
@@ -2564,8 +1381,10 @@ class DownloadRepository:
             (
                 plan_detail_id,
                 plan_id,
+                item_code,
                 item_id,
                 source_item_id,
+                location_id,
 
                 new_zone,
                 before_zone,
@@ -2575,6 +1394,7 @@ class DownloadRepository:
                 qty,
                 qty_on_hand,
                 qty_audit,
+                server_qty_audit,
 
                 check_date,
                 checker,
@@ -2622,8 +1442,10 @@ class DownloadRepository:
             (
                 :plan_detail_id,
                 :plan_id,
+                :item_code,
                 :item_id,
                 :source_item_id,
+                :location_id,
 
                 :new_zone,
                 :before_zone,
@@ -2633,6 +1455,7 @@ class DownloadRepository:
                 :qty,
                 :qty_on_hand,
                 :qty_audit,
+                :server_qty_audit,
 
                 :check_date,
                 :checker,
@@ -2693,6 +1516,7 @@ class DownloadRepository:
         - plan_detail_id ใหม่ ให้ Insert
         - qty รับค่าจาก Server เสมอ
         - qty_on_hand ห้ามทับเมื่อ Count ยังรอ Sync
+        - server_qty_audit รับค่าจาก Server เสมอ
         - qty_audit ห้ามทับเมื่อ Audit ยังรอ Sync
         - Local transaction และ Local user ต้องไม่ถูกล้าง
         """
@@ -2745,6 +1569,14 @@ class DownloadRepository:
 
             if source_item_id <= 0:
                 source_item_id = item_id
+            if not item_code:
+                raise DownloadRepositoryError(
+                    f"Refresh Detail แถวที่ {index:,} ไม่มี item_code"
+                )
+            if location_id <= 0:
+                raise DownloadRepositoryError(
+                    f"Refresh Detail แถวที่ {index:,} ไม่มี location_id ที่ถูกต้อง"
+                )
 
             server_update_date = self._to_datetime_text(
                 detail.get("update_date")
@@ -2758,7 +1590,9 @@ class DownloadRepository:
                 {
                     "plan_detail_id": plan_detail_id,
                     "plan_id": plan_id,
+                    "item_code": item_code,
                     "item_id": item_id,
+                    "location_id": location_id,
                     "source_item_id": source_item_id,
 
                     "new_zone": self._to_text(
@@ -2781,6 +1615,9 @@ class DownloadRepository:
                         detail.get("qty_on_hand")
                     ),
                     "qty_audit": self._to_float(
+                        detail.get("qty_audit")
+                    ),
+                    "server_qty_audit": self._to_float(
                         detail.get("qty_audit")
                     ),
 
@@ -2853,8 +1690,10 @@ class DownloadRepository:
             (
                 plan_detail_id,
                 plan_id,
+                item_code,
                 item_id,
                 source_item_id,
+                location_id,
 
                 new_zone,
                 before_zone,
@@ -2864,6 +1703,7 @@ class DownloadRepository:
                 qty,
                 qty_on_hand,
                 qty_audit,
+                server_qty_audit,
 
                 check_date,
                 checker,
@@ -2911,8 +1751,10 @@ class DownloadRepository:
             (
                 :plan_detail_id,
                 :plan_id,
+                :item_code,
                 :item_id,
                 :source_item_id,
+                :location_id,
 
                 :new_zone,
                 :before_zone,
@@ -2922,6 +1764,7 @@ class DownloadRepository:
                 :qty,
                 :qty_on_hand,
                 :qty_audit,
+                :server_qty_audit,
 
                 :check_date,
                 :checker,
@@ -2970,7 +1813,9 @@ class DownloadRepository:
             DO UPDATE SET
 
                 plan_id = excluded.plan_id,
+                item_code = excluded.item_code,
                 item_id = excluded.item_id,
+                location_id = excluded.location_id,
                 source_item_id = excluded.source_item_id,
 
                 new_zone = excluded.new_zone,
@@ -3005,6 +1850,12 @@ class DownloadRepository:
 
                         ELSE excluded.qty_on_hand
                     END,
+
+                /*
+                Snapshot Audit จาก Server ต้องอัปเดตทุกครั้งที่ Refresh
+                และไม่ถูก Local Audit แก้ไข
+                */
+                server_qty_audit = excluded.server_qty_audit,
 
                 /*
                 หาก Audit ยังมี Local Pending/Error/Syncing
@@ -3217,6 +2068,38 @@ class DownloadRepository:
     # =====================================================
     # Save Download Metadata
     # =====================================================
+    def _resolve_detail_locations(
+        self,
+        connection: sqlite3.Connection,
+        plan_id: int,
+    ) -> None:
+        """Validate location_id supplied by DownloadPlan.ashx.
+
+        The server is the authority for location_id. This method never remaps or
+        overwrites it from before_location/new_location.
+        """
+        missing_rows = connection.execute(
+            """
+            SELECT pd.plan_detail_id, pd.location_id
+            FROM tb_plan_detail AS pd
+            LEFT JOIN tb_location AS l
+              ON l.plan_id = pd.plan_id
+             AND l.location_id = pd.location_id
+            WHERE pd.plan_id = ?
+              AND (pd.location_id IS NULL OR pd.location_id <= 0 OR l.location_id IS NULL)
+            ORDER BY pd.plan_detail_id
+            LIMIT 20
+            """,
+            (int(plan_id),),
+        ).fetchall()
+        if missing_rows:
+            sample = ", ".join(
+                f"{row['plan_detail_id']}:{row['location_id']}" for row in missing_rows
+            )
+            raise DownloadRepositoryError(
+                "Location ID ใน Plan Detail ไม่ตรงกับรายการ Location ที่ Server ส่งมา: " + sample
+            )
+
     def _save_download_metadata(
         self,
         connection: sqlite3.Connection,
@@ -3460,14 +2343,13 @@ class DownloadRepository:
         เงื่อนไขหลัก:
             - ต้องมีอย่างน้อย 1 รายการ
             - item_id ต้องไม่ซ้ำ
-            - item_code ต้องไม่ซ้ำ
+            - item_code ซ้ำได้เมื่อเป็นคนละ item_id
         """
         if not items:
             raise DownloadRepositoryError(
                 "ไม่พบข้อมูลสินค้าใน Download Package"
             )
         item_ids = set()
-        item_codes = set()
         for index, item in enumerate(
             items,
             start=1,
@@ -3495,22 +2377,12 @@ class DownloadRepository:
                     f"สินค้าแถวที่ {index:,} "
                     "ไม่มี item_code"
                 )
-            normalized_item_code = (
-                item_code.strip().upper()
-            )
             if item_id in item_ids:
                 raise DownloadRepositoryError(
                     f"พบ item_id ซ้ำ: {item_id}"
                 )
-            if normalized_item_code in item_codes:
-                raise DownloadRepositoryError(
-                    f"พบ item_code ซ้ำ: {item_code}"
-                )
             item_ids.add(
                 item_id
-            )
-            item_codes.add(
-                normalized_item_code
             )
     # =====================================================
     # Validate Barcodes

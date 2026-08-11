@@ -10,8 +10,9 @@ Download Plan Service
 from __future__ import annotations
 
 from typing import Any, Dict
-
 import requests
+
+from utils.http_json import decode_json_response, build_server_error, JsonResponseError
 
 from repository.download_repository import DownloadRepository
 
@@ -208,30 +209,9 @@ class DownloadService:
         response: requests.Response,
     ) -> Dict[str, Any]:
         try:
-            data = response.json()
-
-        except ValueError as exc:
-            body = response.text.strip()
-
-            if len(body) > 500:
-                body = body[:500] + "..."
-
-            raise DownloadServiceError(
-                "Server ไม่ได้ส่งข้อมูล JSON ที่ถูกต้อง"
-                + (
-                    f"\nResponse: {body}"
-                    if body
-                    else ""
-                )
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise DownloadServiceError(
-                "รูปแบบข้อมูลจาก Server ไม่ถูกต้อง "
-                "ข้อมูลหลักต้องเป็น JSON Object"
-            )
-
-        return data
+            return decode_json_response(response, require_object=True)
+        except JsonResponseError as exc:
+            raise DownloadServiceError(str(exc)) from exc
 
     # =====================================================
     # Validate Server Response
@@ -244,15 +224,11 @@ class DownloadService:
     ) -> None:
         success = bool(data.get("success", False))
 
-        message = str(
-            data.get("message")
-            or data.get("error")
-            or ""
-        ).strip()
+        full_message = build_server_error(data, "Download Plan Error")
 
         if response.status_code >= 400:
             raise DownloadServiceError(
-                message
+                full_message
                 or (
                     "Server ตอบกลับด้วย HTTP Status "
                     f"{response.status_code}"
@@ -261,7 +237,7 @@ class DownloadService:
 
         if not success:
             raise DownloadServiceError(
-                message
+                full_message
                 or "Server แจ้งว่า Download Plan ไม่สำเร็จ"
             )
 
@@ -342,7 +318,6 @@ class DownloadService:
         items: list,
     ) -> None:
         seen_item_ids = set()
-        seen_item_codes = set()
 
         for index, item in enumerate(items):
             if not isinstance(item, dict):
@@ -374,13 +349,7 @@ class DownloadService:
                     f"พบ item_id ซ้ำใน items: {item_id}"
                 )
 
-            if item_code in seen_item_codes:
-                raise DownloadServiceError(
-                    f"พบ item_code ซ้ำใน items: {item_code}"
-                )
-
             seen_item_ids.add(item_id)
-            seen_item_codes.add(item_code)
 
     # =====================================================
     # Validate Barcodes
@@ -499,6 +468,8 @@ class DownloadService:
             except (TypeError, ValueError):
                 item_id = 0
 
+            item_code = str(detail.get("item_code") or "").strip()
+
             if plan_detail_id <= 0:
                 raise DownloadServiceError(
                     f"details[{index}] ไม่มี plan_detail_id "
@@ -513,6 +484,11 @@ class DownloadService:
             if item_id <= 0:
                 raise DownloadServiceError(
                     f"details[{index}] ไม่มี item_id ที่ถูกต้อง"
+                )
+
+            if not item_code:
+                raise DownloadServiceError(
+                    f"details[{index}] ไม่มี item_code"
                 )
 
             if plan_detail_id in seen_detail_ids:

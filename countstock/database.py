@@ -26,96 +26,61 @@ def connect():
     return conn
 
 
-def _column_exists(conn, table_name: str, column_name: str) -> bool:
-    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return any(str(row["name"]).lower() == column_name.lower() for row in rows)
-
-
 def init_db():
+    """Create the CountStock database for a clean installation."""
     with connect() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS db_config (
-            branch_name TEXT,
-            iis_server_ip TEXT,
-            db_server_ip TEXT,
-            db_name TEXT,
-            db_user TEXT,
-            db_password TEXT,
-            count_month TEXT
-        );
-        CREATE TABLE IF NOT EXISTS main_products (
-            barcode TEXT PRIMARY KEY,
-            product_code TEXT,
-            product_name TEXT,
-            dept TEXT,
-            count_month TEXT,
-            unit TEXT
-        );
-        CREATE INDEX IF NOT EXISTS ix_main_products_code
-            ON main_products(product_code);
-        CREATE TABLE IF NOT EXISTS countstock_scan_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            location TEXT NOT NULL,
-            staff_name TEXT NOT NULL,
-            product_code TEXT NOT NULL,
-            scanned_value TEXT NOT NULL,
-            qty INTEGER NOT NULL DEFAULT 1,
-            scan_date TEXT NOT NULL,
-            sync_status TEXT NOT NULL DEFAULT 'PENDING',
-            synced_at TEXT,
-            sync_scan_data INTEGER NOT NULL DEFAULT 0,
-            sync_scan_slottag INTEGER NOT NULL DEFAULT 0,
-            synced_scan_data_at TEXT,
-            synced_scan_slottag_at TEXT
-        );
-        """)
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS db_config (
+                branch_name TEXT,
+                iis_server_ip TEXT,
+                db_server_ip TEXT,
+                db_name TEXT,
+                db_user TEXT,
+                db_password TEXT,
+                count_month TEXT
+            );
 
-        # Migration from the first CountStock schema.
-        if not _column_exists(conn, "countstock_scan_data", "sync_status"):
-            conn.execute(
-                "ALTER TABLE countstock_scan_data "
-                "ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'PENDING'"
-            )
-        if not _column_exists(conn, "countstock_scan_data", "synced_at"):
-            conn.execute(
-                "ALTER TABLE countstock_scan_data ADD COLUMN synced_at TEXT"
-            )
+            CREATE TABLE IF NOT EXISTS countstock_staff (
+                staff_code TEXT PRIMARY KEY
+            );
 
-        # Track each export destination independently. Legacy rows already
-        # marked SYNCED are treated as completed for both destinations to
-        # prevent accidental duplicate inserts after upgrading.
-        destination_columns = (
-            ("sync_scan_data", "INTEGER NOT NULL DEFAULT 0"),
-            ("sync_scan_slottag", "INTEGER NOT NULL DEFAULT 0"),
-            ("synced_scan_data_at", "TEXT"),
-            ("synced_scan_slottag_at", "TEXT"),
-        )
-        for column_name, column_sql in destination_columns:
-            if not _column_exists(conn, "countstock_scan_data", column_name):
-                conn.execute(
-                    f"ALTER TABLE countstock_scan_data ADD COLUMN {column_name} {column_sql}"
-                )
-        conn.execute("""
-            UPDATE countstock_scan_data
-            SET sync_scan_data = 1,
-                sync_scan_slottag = 1
-            WHERE UPPER(COALESCE(sync_status, '')) = 'SYNCED'
-              AND sync_scan_data = 0
-              AND sync_scan_slottag = 0
-        """)
+            CREATE TABLE IF NOT EXISTS main_products (
+                barcode TEXT PRIMARY KEY,
+                product_code TEXT,
+                product_name TEXT,
+                dept TEXT,
+                count_month TEXT,
+                unit TEXT
+            );
 
-        # The former unique index prevents creating a new pending delta after a
-        # row has already been synced. Remove it and keep uniqueness only among
-        # the current pending rows in application logic.
-        conn.execute("DROP INDEX IF EXISTS ux_countstock_scan")
-        conn.execute("""
+            CREATE TABLE IF NOT EXISTS countstock_scan_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                location TEXT NOT NULL,
+                staff_name TEXT NOT NULL,
+                product_code TEXT NOT NULL,
+                scanned_value TEXT NOT NULL,
+                qty INTEGER NOT NULL DEFAULT 1,
+                scan_date TEXT NOT NULL,
+                sync_status TEXT NOT NULL DEFAULT 'PENDING',
+                synced_at TEXT,
+                sync_scan_data INTEGER NOT NULL DEFAULT 0,
+                sync_scan_slottag INTEGER NOT NULL DEFAULT 0,
+                synced_scan_data_at TEXT,
+                synced_scan_slottag_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_main_products_code
+                ON main_products(product_code);
             CREATE INDEX IF NOT EXISTS ix_countstock_sync_status
-            ON countstock_scan_data(sync_status, id)
-        """)
-        conn.execute("""
+                ON countstock_scan_data(sync_status, id);
             CREATE INDEX IF NOT EXISTS ix_countstock_lookup
-            ON countstock_scan_data(location, product_code, scanned_value, sync_status)
-        """)
+                ON countstock_scan_data(
+                    location, product_code, scanned_value, sync_status
+                );
+            """
+        )
+
 
 
 def get_config():
@@ -142,6 +107,34 @@ def save_config(item: dict, iis_ip: str):
             item.get("db_user", ""), item.get("db_password", ""),
             item.get("count_month", "")
         ))
+
+
+def replace_staff(staff_list):
+    """เก็บ Staff config กลางชุดเดียวสำหรับทุกสาขา."""
+    values = []
+    seen = set()
+    for value in staff_list or []:
+        code = str(value or "").strip()
+        if code and code not in seen:
+            seen.add(code)
+            values.append((code,))
+    with connect() as conn:
+        conn.execute("DELETE FROM countstock_staff")
+        if values:
+            conn.executemany(
+                "INSERT INTO countstock_staff(staff_code) VALUES (?)", values
+            )
+    return len(values)
+
+
+def get_staff_list():
+    with connect() as conn:
+        return [
+            row["staff_code"]
+            for row in conn.execute(
+                "SELECT staff_code FROM countstock_staff ORDER BY staff_code"
+            ).fetchall()
+        ]
 
 
 def replace_products(items: list[dict]) -> int:
@@ -293,7 +286,8 @@ def export_rows(table_name: str):
             SELECT id, location, staff_name, product_code,
                    scanned_value AS barcode, qty, scan_date
             FROM countstock_scan_data
-            WHERE COALESCE({status_column}, 0) = 0
+            WHERE COALESCE(sync_scan_data, 0) = 0
+              AND COALESCE(sync_scan_slottag, 0) = 0
             ORDER BY id
         """).fetchall()]
 

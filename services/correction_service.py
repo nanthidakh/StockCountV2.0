@@ -22,6 +22,7 @@ class CorrectionService:
         return getattr(source, key, default)
 
     def correct_qty(self, old_transaction, new_qty, checker=None):
+        """แก้รายการ COUNT เดิมที่ยังไม่ Sync โดยไม่สร้าง Transaction/Queue ใหม่."""
         if old_transaction is None:
             raise ValueError("กรุณาเลือกรายการที่ต้องการแก้ไข")
 
@@ -33,45 +34,22 @@ class CorrectionService:
         if new_qty < 0:
             raise ValueError("จำนวนใหม่ต้องไม่น้อยกว่า 0")
 
-        plan_detail_id = self._value(
-            old_transaction,
-            "plan_detail_id",
-        )
-
-        if plan_detail_id is None:
-            raise ValueError("ไม่พบ Plan Detail ของรายการ")
-
-        detail = self.count_repo.get_plan_detail_by_id(
-            int(plan_detail_id)
-        )
-
-        if not detail:
-            raise ValueError("ไม่พบรายการใน Plan")
-
-        barcode = self._value(old_transaction, "barcode")
-        if not barcode:
-            barcode = detail.get("item_code", "")
+        history_id = self._value(old_transaction, "history_id")
+        if history_id is None:
+            raise ValueError("ไม่พบ History ID ของรายการที่เลือก")
 
         checker = (
             str(checker or "").strip()
             or str(self._value(old_transaction, "checker", "")).strip()
-            or str(detail.get("checker") or "").strip()
             or "ANDROID"
         )
 
-        correction = CountTransaction.create_count(
-            plan_id=detail["plan_id"],
-            plan_detail_id=detail["plan_detail_id"],
-            item_id=detail["item_id"],
-            location_id=detail.get("location_id") or "",
-            barcode=barcode,
-            qty=new_qty,
+        return self.count_repo.update_pending_qty(
+            history_id=int(history_id),
+            new_qty=new_qty,
             checker=checker,
         )
 
-        self.count_repo.correction_qty(correction)
-
-        return correction
     def correct_locations(self, transactions, new_location_code, checker=None):
         new_location_code = str(new_location_code or "").strip()
         if not new_location_code:

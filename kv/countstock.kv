@@ -59,7 +59,7 @@
                 height: self.minimum_height
 
                 MDRaisedButton:
-                    text: "ตั้งค่า CountStock"
+                    text: "ตั้งค่า"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -67,7 +67,7 @@
                     on_release: root.go_to("countstock_config")
 
                 MDRaisedButton:
-                    text: "Import Product Data"
+                    text: "นำเข้าข้อมูลสินค้า"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -75,7 +75,7 @@
                     on_release: root.go_to("countstock_import")
 
                 MDRaisedButton:
-                    text: "เก็บรายการสินค้า"
+                    text: "เก็บข้อมูลรายการสินค้า"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -120,7 +120,7 @@
                 width: "80dp"
                 on_release: root.go_back()
             MDLabel:
-                text: "CountStock Configuration"
+                text: "ตั้งค่าข้อมูล"
                 font_name: "ThaiFont"
                 halign: "center"
                 theme_text_color: "Custom"
@@ -174,7 +174,7 @@
                 width: "80dp"
                 on_release: root.go_back()
             MDLabel:
-                text: "Import Product Data"
+                text: "นำเข้าข้อมูลสินค้า"
                 font_name: "ThaiFont"
                 halign: "center"
                 theme_text_color: "Custom"
@@ -188,8 +188,9 @@
             spacing: "16dp"
             MDLabel:
                 id: lbl_sqlite_count
-                text: "ข้อมูลใน SQLite\nสินค้า 0 รายการ | บาร์โค้ด 0 รายการ"
+                text: "ข้อมูลในเครื่อง\nสินค้า 0 รายการ\nบาร์โค้ด 0 รายการ"
                 font_name: "ThaiFont"
+                font_size: "13sp"
                 halign: "center"
                 size_hint_y: None
                 height: "70dp"
@@ -197,10 +198,11 @@
                 id: lbl_status
                 text: "พร้อมนำเข้าข้อมูลสินค้า"
                 font_name: "ThaiFont"
+                font_size: "13sp"
                 halign: "center"
             MDRaisedButton:
                 id: btn_import
-                text: "IMPORT"
+                text: "นำเข้า"
                 size_hint: 1, None
                 height: "55dp"
                 on_release: root.start_import()
@@ -221,7 +223,7 @@
                 on_release: root.go_back()
 
             MDLabel:
-                text: "เก็บรายการสินค้า"
+                text: "เก็บข้อมูลรายการสินค้า"
                 font_name: "ThaiFont"
                 halign: "center"
                 theme_text_color: "Custom"
@@ -236,17 +238,30 @@
             padding: "10dp"
             spacing: "6dp"
 
-            MDTextField:
-                id: txt_staff
-                hint_text: "ผู้เก็บข้อมูล"
-                font_name: "ThaiFont"
-                mode: "rectangle"
-                multiline: False
-                write_tab: False
+            MDBoxLayout:
                 size_hint_y: None
                 height: "48dp"
-                on_touch_down: root.prepare_field(self, args[1], True)
-                on_text_validate: root.on_staff_validate()
+                spacing: "8dp"
+
+                MDLabel:
+                    text: "Staff :"
+                    font_name: "ThaiFont"
+                    size_hint_x: None
+                    width: "72dp"
+                    halign: "right"
+                    valign: "middle"
+                    text_size: self.size
+
+                MDRaisedButton:
+                    id: btn_staff
+                    text: "-เลือก-"
+                    font_name: "ThaiFont"
+                    size_hint_x: None
+                    width: "145dp"
+                    md_bg_color: 1.0, 0.55, 0.0, 1
+                    on_release: root.open_staff_menu()
+
+                Widget:
 
             MDBoxLayout:
                 size_hint_y: None
@@ -289,6 +304,7 @@
                 id: lbl_result
                 text: "พร้อมสแกน"
                 font_name: "ThaiFont"
+                font_size: "13sp"
                 halign: "center"
                 valign: "middle"
                 text_size: self.width, None
@@ -309,6 +325,7 @@
                 MDBoxLayout:
                     id: recent_list
                     orientation: "vertical"
+                    font_size: "13sp"
                     size_hint_y: None
                     height: self.minimum_height
                     spacing: "2dp"
@@ -343,7 +360,7 @@
 
             MDLabel:
                 id: lbl_export_count
-                text: "ข้อมูลทั้งหมด 0 รายการ\nSync แล้ว 0 | ยังไม่ Sync 0"
+                text: "ข้อมูลทั้งหมด 0 รายการ\nSync แล้ว 0 \nยังไม่ Sync 0"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 halign: "center"
@@ -351,67 +368,30 @@
                 height: "78dp"
 
             MDLabel:
-                text: "เลือกตารางที่ต้องการ Sync"
+                text: "Export ข้อมูลชุดปัจจุบัน \n เลือกExport ได้อย่างใดอย่างหนึ่งเท่านั้น\n"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 bold: True
+                halign: "center"
                 size_hint_y: None
                 height: "30dp"
-
-            MDBoxLayout:
-                size_hint_y: None
-                height: "46dp"
-                spacing: "8dp"
-                padding: "6dp", 0
-                md_bg_color: (*app.theme_cls.primary_color[:3], .22) if chk_scan_data.active else (0, 0, 0, 0)
-
-                MDCheckbox:
-                    id: chk_scan_data
-                    size_hint: None, None
-                    size: "44dp", "44dp"
-                    active: True
-                    selected_color: app.theme_cls.primary_color
-                    unselected_color: .45, .45, .45, 1
-                    on_active: root.on_target_changed()
-
-                MDLabel:
-                    text: "Countstock_scan_data"
-                    font_name: "ThaiFont"
-                    font_size: "14sp"
-                    valign: "middle"
-                    text_size: self.size
-
-            MDBoxLayout:
-                size_hint_y: None
-                height: "46dp"
-                spacing: "8dp"
-                padding: "6dp", 0
-                md_bg_color: (*app.theme_cls.primary_color[:3], .22) if chk_scan_slottag.active else (0, 0, 0, 0)
-
-                MDCheckbox:
-                    id: chk_scan_slottag
-                    size_hint: None, None
-                    size: "44dp", "44dp"
-                    active: False
-                    selected_color: app.theme_cls.primary_color
-                    unselected_color: .45, .45, .45, 1
-                    on_active: root.on_target_changed()
-
-                MDLabel:
-                    text: "Countstock_scan_slottag"
-                    font_name: "ThaiFont"
-                    font_size: "14sp"
-                    valign: "middle"
-                    text_size: self.size
-
             MDRaisedButton:
-                id: btn_export_selected
-                text: "Sync ตารางที่เลือก"
+                id: btn_export_scan_data
+                text: "เก็บข้อมูลพร้อมขอ Slottag"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 size_hint: 1, None
-                height: "50dp"
-                on_release: root.export_selected()
+                height: "52dp"
+                on_release: root.export_to("Countstock_scan_data")
+
+            MDRaisedButton:
+                id: btn_export_slottag
+                text: "ขอ Slottag อย่างเดียว"
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                size_hint: 1, None
+                height: "52dp"
+                on_release: root.export_to("Countstock_scan_slottag")
 
             MDLabel:
                 id: lbl_status
@@ -423,18 +403,9 @@
                 text_size: self.size
                 size_hint_y: None
                 height: "54dp"
-
-            MDLabel:
-                text: "เลือกได้ทั้ง 2 ตาราง หรือเลือกเพียงตารางเดียว"
-                font_name: "ThaiFont"
-                font_size: "14sp"
-                theme_text_color: "Secondary"
-                halign: "center"
-                size_hint_y: None
-                height: "32dp"
-
+          
             MDRaisedButton:
-                text: "ล้างข้อมูลในเครื่อง"
+                text: "ลบข้อมูลในเครื่อง"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 size_hint: 1, None

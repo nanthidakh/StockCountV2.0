@@ -10,6 +10,7 @@ Download Plan Screen
 from __future__ import annotations
 
 import threading
+import traceback
 from typing import Any, Dict, Optional
 
 from kivy.app import App
@@ -99,142 +100,54 @@ class DownloadScreen(BaseScreen):
         )
 
     def _load_existing_download_summary(self):
-        """อ่านจำนวนข้อมูลของ Plan ล่าสุดที่มีอยู่จริงใน SQLite."""
-
+        """Load summary of the latest downloaded plan from the clean schema."""
         app = App.get_running_app()
         if app is None or not self._has_database(app):
             return
 
         connection = None
         should_close = False
-
         try:
-            db = app.db
-
-            if hasattr(db, "get_connection"):
-                connection = db.get_connection()
-                should_close = True
-            elif hasattr(db, "connect"):
-                connection = db.connect()
-            else:
-                return
-
-            if connection is None:
-                return
-
-            def table_exists(table_name):
-                row = connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (table_name,),
-                ).fetchone()
-                return row is not None
-
-            if not table_exists("tb_plan"):
-                return
-
-            plan_columns = {
-                row[1]
-                for row in connection.execute(
-                    "PRAGMA table_info(tb_plan)"
-                ).fetchall()
-            }
-
-            code_column = (
-                "plan_code"
-                if "plan_code" in plan_columns
-                else "plan_name"
-                if "plan_name" in plan_columns
-                else None
-            )
-            order_column = (
-                "download_date"
-                if "download_date" in plan_columns
-                else "plan_id"
-            )
-            code_select = code_column if code_column else "''"
+            connection = app.db.get_connection()
+            should_close = True
 
             plan_row = connection.execute(
-                f"""
-                SELECT plan_id, {code_select} AS plan_code
+                """
+                SELECT plan_id, plan_code
                 FROM tb_plan
-                ORDER BY
-                    CASE WHEN {order_column} IS NULL THEN 1 ELSE 0 END,
-                    {order_column} DESC,
-                    plan_id DESC
+                ORDER BY download_date DESC, plan_id DESC
                 LIMIT 1
                 """
             ).fetchone()
-
             if plan_row is None:
                 return
 
-            plan_id = self._safe_int(plan_row[0])
-            plan_code = str(plan_row[1] or "").strip()
+            plan_id = self._safe_int(plan_row["plan_id"])
+            plan_code = str(plan_row["plan_code"] or "").strip()
 
-            detail_count = 0
-            item_count = 0
-            barcode_count = 0
-            location_count = 0
-
-            if table_exists("tb_plan_detail"):
-                detail_count = self._safe_int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM tb_plan_detail WHERE plan_id=?",
-                        (plan_id,),
-                    ).fetchone()[0]
+            detail_count = self._safe_int(connection.execute(
+                "SELECT COUNT(*) FROM tb_plan_detail WHERE plan_id=?",
+                (plan_id,),
+            ).fetchone()[0])
+            item_count = self._safe_int(connection.execute(
+                "SELECT COUNT(DISTINCT item_id) FROM tb_plan_detail WHERE plan_id=?",
+                (plan_id,),
+            ).fetchone()[0])
+            barcode_count = self._safe_int(connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM tb_barcode AS b
+                WHERE EXISTS (
+                    SELECT 1 FROM tb_plan_detail AS d
+                    WHERE d.plan_id=? AND d.item_id=b.item_id
                 )
-                item_count = self._safe_int(
-                    connection.execute(
-                        "SELECT COUNT(DISTINCT item_id) FROM tb_plan_detail WHERE plan_id=?",
-                        (plan_id,),
-                    ).fetchone()[0]
-                )
-
-                if table_exists("tb_barcode"):
-                    barcode_count = self._safe_int(
-                        connection.execute(
-                            """
-                            SELECT COUNT(*)
-                            FROM tb_barcode b
-                            WHERE EXISTS
-                            (
-                                SELECT 1
-                                FROM tb_plan_detail d
-                                WHERE d.plan_id=?
-                                  AND d.item_id=b.item_id
-                            )
-                            """,
-                            (plan_id,),
-                        ).fetchone()[0]
-                    )
-
-            if table_exists("tb_location"):
-                location_columns = {
-                    row[1]
-                    for row in connection.execute(
-                        "PRAGMA table_info(tb_location)"
-                    ).fetchall()
-                }
-                if "plan_id" in location_columns:
-                    location_count = self._safe_int(
-                        connection.execute(
-                            "SELECT COUNT(*) FROM tb_location WHERE plan_id=?",
-                            (plan_id,),
-                        ).fetchone()[0]
-                    )
-                elif table_exists("tb_plan_detail"):
-                    location_count = self._safe_int(
-                        connection.execute(
-                            """
-                            SELECT COUNT(DISTINCT location_id)
-                            FROM tb_plan_detail
-                            WHERE plan_id=?
-                              AND location_id IS NOT NULL
-                              AND TRIM(CAST(location_id AS TEXT))<>''
-                            """,
-                            (plan_id,),
-                        ).fetchone()[0]
-                    )
+                """,
+                (plan_id,),
+            ).fetchone()[0])
+            location_count = self._safe_int(connection.execute(
+                "SELECT COUNT(*) FROM tb_location WHERE plan_id=?",
+                (plan_id,),
+            ).fetchone()[0])
 
             self.downloaded_plan_id = plan_id
             self.downloaded_plan_code = plan_code
@@ -243,33 +156,15 @@ class DownloadScreen(BaseScreen):
             self.location_count = location_count
             self.detail_count = detail_count
             self.status_text = "พบข้อมูลที่ดาวน์โหลดไว้ในเครื่อง"
-            self.result_text = (
-                f"Plan ID: {plan_id}\n"
-                f"Plan: {plan_code}\n"
-                f"สินค้า: {item_count:,} รายการ\n"
-                f"Barcode: {barcode_count:,} รายการ\n"
-                f"Location: {location_count:,} รายการ\n"
-                f"Plan Detail: {detail_count:,} รายการ"
-            )
 
-            plan_field = self._get_widget("txt_plan")
-            if plan_field is not None and not str(plan_field.text or "").strip():
-                plan_field.text = str(plan_id)
-
-            self._update_widget_state()
-            self._set_status_widget(self.status_text)
-            self._set_result_widget(self.result_text)
-
+            if "txt_plan" in self.ids:
+                self.ids.txt_plan.text = str(plan_id)
         except Exception as exc:
-            # การอ่าน Summary เดิมไม่ควรทำให้เข้าหน้า Download ไม่ได้
-            print(f"Load existing download summary failed: {exc}")
-
+            logger.warning(f"Unable to load download summary: {exc}")
         finally:
             if should_close and connection is not None:
-                try:
-                    connection.close()
-                except Exception:
-                    pass
+                connection.close()
+
 
     def on_leave(self, *args):
         """
@@ -395,7 +290,8 @@ class DownloadScreen(BaseScreen):
             )
 
         except DownloadServiceError as exc:
-            message = str(exc).strip()
+            traceback.print_exc()
+            message = str(exc).strip() or exc.__class__.__name__
 
             Clock.schedule_once(
                 lambda dt, error=message:
@@ -404,16 +300,14 @@ class DownloadScreen(BaseScreen):
             )
 
         except Exception as exc:
-            message = str(exc).strip()
-
-            if not message:
-                message = exc.__class__.__name__
+            traceback.print_exc()
+            message = str(exc).strip() or exc.__class__.__name__
+            error_type = exc.__class__.__name__
 
             Clock.schedule_once(
-                lambda dt, error=message:
+                lambda dt, error=message, kind=error_type:
                     self._download_failed(
-                        "เกิดข้อผิดพลาดที่ไม่คาดคิด\n"
-                        + error
+                        f"{kind}\n{error}"
                     ),
                 0,
             )
@@ -519,6 +413,10 @@ class DownloadScreen(BaseScreen):
         """
         ทำงานบน Main Thread เมื่อ Download ไม่สำเร็จ
         """
+
+        message = str(message or "").strip()
+        if not message:
+            message = "Download Plan ไม่สำเร็จ: ไม่พบรายละเอียดข้อผิดพลาด"
 
         self.is_downloading = False
         self.progress_value = 0

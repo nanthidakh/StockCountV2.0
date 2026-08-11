@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from repository.sync_repository import SyncRepository
+from utils.http_json import decode_json_response, build_server_error, JsonResponseError
 
 
 class SyncService:
@@ -65,8 +66,9 @@ class SyncService:
 
         try:
             response = requests.post(endpoint, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            result = response.json()
+            result = decode_json_response(response, require_object=True)
+            if response.status_code >= 400:
+                raise RuntimeError(build_server_error(result, f"HTTP {response.status_code}"))
         except Exception as exc:
             self.repo.restore_pending(guids, str(exc))
             raise RuntimeError(f"ส่งข้อมูลไป Server ไม่สำเร็จ: {exc}") from exc
@@ -115,7 +117,7 @@ class SyncService:
             transaction_type=transaction_type,
         )
 
-    def process(self, sync_url, plan_id, device_name, transaction_type="COUNT"):
+    def process(self, sync_url, plan_id, device_name, transaction_type="COUNT", retry_error=False):
         sync_batch_guid = self.get_current_batch_guid(plan_id, transaction_type)
         if not sync_batch_guid:
             raise RuntimeError("ยังไม่มี Batch ที่ส่งขึ้น Server กรุณากดส่งข้อมูลก่อน")
@@ -126,10 +128,12 @@ class SyncService:
             "device_name": str(device_name or "UNKNOWN_DEVICE"),
             "plan_id": int(plan_id),
             "sync_batch_guid": sync_batch_guid,
+            "retry_error": bool(retry_error),
         }
         response = requests.post(endpoint, json=payload, timeout=self.timeout)
-        response.raise_for_status()
-        result = response.json()
+        result = decode_json_response(response, require_object=True)
+        if response.status_code >= 400:
+            raise RuntimeError(build_server_error(result, f"HTTP {response.status_code}"))
         if not bool(result.get("success")):
             errors = result.get("validation_errors") or []
             details = []
@@ -152,6 +156,16 @@ class SyncService:
             raise RuntimeError(base_message)
         return result
 
+    def retry_process_error(self, sync_url, plan_id, device_name, transaction_type="COUNT"):
+        """Reprocess only Server staging rows in ERROR for the current batch."""
+        return self.process(
+            sync_url,
+            plan_id,
+            device_name,
+            transaction_type=transaction_type,
+            retry_error=True,
+        )
+
     def server_status(self, sync_url, plan_id, transaction_type="COUNT"):
         sync_batch_guid = self.get_current_batch_guid(plan_id, transaction_type)
         if not sync_batch_guid:
@@ -172,8 +186,9 @@ class SyncService:
             "sync_batch_guid": sync_batch_guid,
         }
         response = requests.post(endpoint, json=payload, timeout=self.timeout)
-        response.raise_for_status()
-        result = response.json()
+        result = decode_json_response(response, require_object=True)
+        if response.status_code >= 400:
+            raise RuntimeError(build_server_error(result, f"HTTP {response.status_code}"))
         if not bool(result.get("success")):
             raise RuntimeError(result.get("message") or "อ่านสถานะ Server ไม่สำเร็จ")
 

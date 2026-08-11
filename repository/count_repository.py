@@ -127,7 +127,7 @@ class CountRepository(BaseRepository):
                      OR TRIM(l.location_code) = TRIM(COALESCE(NULLIF(pd.new_location, ''), pd.before_location))
                   )
             WHERE pd.plan_id = ?
-              AND pd.item_id = ?
+              AND TRIM(pd.item_code) = TRIM((SELECT item_code FROM tb_item WHERE item_id = ? LIMIT 1))
               AND (
                     CAST(pd.location_id AS TEXT) = CAST(? AS TEXT)
                  OR TRIM(COALESCE(NULLIF(pd.new_location, ''), pd.before_location)) = (
@@ -217,11 +217,59 @@ class CountRepository(BaseRepository):
                   )
             WHERE h.plan_id = ?
               AND COALESCE(h.is_audit, 0) = 0
+              AND EXISTS (
+                    SELECT 1
+                    FROM tb_sync_queue AS q
+                    WHERE q.source_table = 'tbt_count_history'
+                      AND q.source_id = h.history_id
+                      AND q.sync_type = 'COUNT'
+                      AND COALESCE(q.sync_status, 'PENDING') <> 'SYNCED'
+              )
             ORDER BY h.history_id DESC
             LIMIT ?
             """,
             (plan_id, limit),
         )
+
+    def get_plan_detail_any_location(self, plan_id, item_id):
+        """หารายการสินค้าใน Plan โดยไม่บังคับ Location เพื่อแยกกรณีผิด Location."""
+        return self.find_one(
+            """
+            SELECT pd.*, i.item_code, i.item_name, i.uom
+            FROM tb_plan_detail AS pd
+            INNER JOIN tb_item AS i ON i.item_id=pd.item_id
+            WHERE pd.plan_id=?
+              AND TRIM(pd.item_code)=TRIM((SELECT item_code FROM tb_item WHERE item_id=? LIMIT 1))
+            ORDER BY pd.plan_detail_id
+            LIMIT 1
+            """, (int(plan_id), int(item_id))
+        )
+
+    def create_local_plan_detail(self, plan_id, item_id, location_id):
+        """สร้าง Plan Detail ชั่วคราวด้วย ID ติดลบ; Server จะสร้าง ID จริงตอน Process."""
+        connection=self.db.get_connection(); cur=connection.cursor()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            item=cur.execute("SELECT item_id,item_code FROM tb_item WHERE item_id=? LIMIT 1",(int(item_id),)).fetchone()
+            loc=cur.execute("SELECT location_id,location_code,location_name FROM tb_location WHERE plan_id=? AND location_id=? LIMIT 1",(int(plan_id),int(location_id))).fetchone()
+            if not item or not loc: raise ValueError("ข้อมูลสินค้า/Location สำหรับสร้างรายการใหม่ไม่ครบ")
+            old=cur.execute("SELECT plan_detail_id FROM tb_plan_detail WHERE plan_id=? AND TRIM(item_code)=TRIM(?) AND location_id=? LIMIT 1",(int(plan_id),item['item_code'],int(location_id))).fetchone()
+            if old:
+                connection.commit(); return int(old['plan_detail_id'])
+            row=cur.execute("SELECT MIN(plan_detail_id) AS min_id FROM tb_plan_detail WHERE plan_detail_id < 0").fetchone()
+            local_id=(int(row['min_id'])-1) if row and row['min_id'] is not None else -1
+            cur.execute("""
+                INSERT INTO tb_plan_detail
+                (plan_detail_id,plan_id,item_code,item_id,source_item_id,location_id,
+                 new_location,before_location,qty,qty_on_hand,qty_audit,is_change_location,
+                 local_is_changed,local_sync_status,count_sync_status,audit_sync_status)
+                VALUES (?,?,?,?,?,?,?,NULL,0,0,0,1,1,'PENDING','NONE','NONE')
+            """,(local_id,int(plan_id),item['item_code'],int(item_id),int(item_id),int(location_id),loc['location_code']))
+            connection.commit(); return local_id
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            cur.close(); connection.close()
 
     def save_count(self, transaction: CountTransaction):
         connection = self.db.get_connection()
@@ -319,76 +367,150 @@ class CountRepository(BaseRepository):
             cursor.close()
             connection.close()
 
-    def correction_qty(self, transaction: CountTransaction, reference_transaction_guid=None):
-        """แก้จำนวนในเครื่องและสร้าง Queue ที่อ้างถึง COUNT เดิม"""
+    def _get_editable_queue(self, cursor, history_id):
+        row = cursor.execute(
+            """
+            SELECT q.*
+            FROM tb_sync_queue AS q
+            WHERE q.source_table = 'tbt_count_history'
+              AND q.source_id = ?
+              AND q.sync_type = 'COUNT'
+            ORDER BY q.queue_id DESC
+            LIMIT 1
+            """,
+            (int(history_id),),
+        ).fetchone()
+
+        if row is None:
+            raise ValueError("ไม่พบ Queue ของรายการที่ต้องการแก้")
+
+        status = str(row["sync_status"] or "PENDING").upper()
+        if status in ("SYNCING", "SYNCED"):
+            raise ValueError("รายการนี้กำลัง Sync หรือ Sync แล้ว ไม่สามารถแก้ไขได้")
+        if status not in ("PENDING", "ERROR"):
+            raise ValueError(f"สถานะรายการ {status} ไม่อนุญาตให้แก้ไข")
+
+        return row
+
+    @staticmethod
+    def _queue_payload(queue_row):
+        try:
+            payload = json.loads(queue_row["payload_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("Payload ของรายการไม่ถูกต้อง") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Payload ของรายการไม่ถูกต้อง")
+        return payload
+
+    def update_pending_qty(self, history_id, new_qty, checker):
+        """แก้ Qty ของ COUNT ที่ยังไม่ Sync และปรับ Queue เดิมเท่านั้น."""
         connection = self.db.get_connection()
         cursor = connection.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         try:
             connection.execute("BEGIN IMMEDIATE")
+
+            source = cursor.execute(
+                """
+                SELECT *
+                FROM tbt_count_history
+                WHERE history_id = ?
+                  AND COALESCE(is_audit, 0) = 0
+                LIMIT 1
+                """,
+                (int(history_id),),
+            ).fetchone()
+            if source is None:
+                raise ValueError("ไม่พบ Transaction ของรายการที่ต้องการแก้")
+
+            queue = self._get_editable_queue(cursor, history_id)
+            payload = self._queue_payload(queue)
+            payload.update({
+                "history_id": int(history_id),
+                "transaction_guid": str(source["transaction_guid"]),
+                "reference_transaction_guid": None,
+                "transaction_type": "COUNT",
+                "operation_type": "INSERT",
+                "qty": float(new_qty),
+                "qty_on_hand": float(new_qty),
+                "checker": str(checker or ""),
+                "is_audit": 0,
+                "audit_round": 0,
+                "check_date": now,
+                "transaction_date": now,
+                "modified_at": now,
+            })
+            payload.pop("correction_type", None)
+
+            cursor.execute(
+                """
+                UPDATE tbt_count_history
+                SET reference_transaction_guid=NULL,
+                    operation_type='INSERT',
+                    qty = ?, checker = ?
+                WHERE history_id = ?
+                """,
+                (float(new_qty), checker, int(history_id)),
+            )
+
+            aggregate_row = cursor.execute(
+                """
+                SELECT COALESCE(SUM(qty), 0) AS total_qty
+                FROM tbt_count_history
+                WHERE plan_id = ?
+                  AND plan_detail_id = ?
+                  AND COALESCE(is_audit, 0) = 0
+                """,
+                (source["plan_id"], source["plan_detail_id"]),
+            ).fetchone()
+            total_qty = float(aggregate_row["total_qty"] or 0)
+
             cursor.execute(
                 """
                 UPDATE tb_plan_detail
-                SET qty_on_hand=?, checker=?, check_date=?,
-                    count_sync_status='PENDING', count_transaction_guid=?,
-                    count_modified_at=?, local_is_changed=1,
-                    local_sync_status='PENDING', local_updated_at=?
-                WHERE plan_detail_id=? AND plan_id=?
+                SET qty_on_hand = ?, checker = ?, check_date = ?,
+                    count_sync_status = 'PENDING',
+                    count_modified_at = ?, local_is_changed = 1,
+                    local_sync_status = 'PENDING', local_updated_at = ?
+                WHERE plan_detail_id = ? AND plan_id = ?
                 """,
                 (
-                    transaction.qty, transaction.checker, transaction.create_date,
-                    transaction.transaction_guid, transaction.create_date,
-                    transaction.create_date, transaction.plan_detail_id,
-                    transaction.plan_id,
+                    total_qty, checker, now, now, now,
+                    source["plan_detail_id"], source["plan_id"],
                 ),
             )
+
             cursor.execute(
                 """
-                INSERT INTO tbt_count_history
-                    (transaction_guid, plan_id, plan_detail_id, item_id,
-                     location_id, barcode, qty, checker, is_audit, create_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                UPDATE tb_sync_queue
+                SET payload_json = ?, sync_status = 'PENDING',
+                    retry_count = 0, error_message = NULL,
+                    last_attempt_at = NULL, synced_at = NULL
+                WHERE queue_id = ?
                 """,
-                (
-                    transaction.transaction_guid, transaction.plan_id,
-                    transaction.plan_detail_id, transaction.item_id,
-                    transaction.location_id, transaction.barcode,
-                    transaction.qty, transaction.checker, transaction.create_date,
-                ),
+                (json.dumps(payload, ensure_ascii=False), queue["queue_id"]),
             )
-            history_id = cursor.lastrowid
-            payload = self._attach_server_location(
-                transaction.to_dict(),
-                transaction.plan_id,
-                transaction.location_id,
-            )
-            payload["operation_type"] = "UPDATE_QTY"
-            payload["reference_transaction_guid"] = reference_transaction_guid
-            payload["history_id"] = history_id
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO tb_sync_queue
-                    (plan_id, plan_detail_id, transaction_guid, sync_type,
-                     transaction_type, source_table, source_id, payload_json,
-                     sync_status, retry_count, create_date, created_at)
-                VALUES (?, ?, ?, 'CORRECTION_QTY', 'CORRECTION_QTY',
-                        'tbt_count_history', ?, ?, 'PENDING', 0, ?, ?)
-                """,
-                (
-                    transaction.plan_id, transaction.plan_detail_id,
-                    transaction.transaction_guid, history_id,
-                    json.dumps(payload, ensure_ascii=False),
-                    transaction.create_date, transaction.create_date,
-                ),
-            )
+
             connection.commit()
-            return {"success": True, "transaction_guid": transaction.transaction_guid}
+            return {
+                "success": True,
+                "history_id": int(history_id),
+                "transaction_guid": source["transaction_guid"],
+                "plan_id": source["plan_id"],
+                "plan_detail_id": source["plan_detail_id"],
+                "item_id": source["item_id"],
+                "location_id": source["location_id"],
+                "barcode": source["barcode"],
+                "qty": float(new_qty),
+                "checker": checker,
+            }
         except Exception:
             connection.rollback()
             raise
         finally:
             cursor.close()
             connection.close()
-
 
     def correct_locations(
         self,
@@ -398,7 +520,7 @@ class CountRepository(BaseRepository):
         new_location_code,
         checker,
     ):
-        """เปลี่ยน Location หลายรายการใน SQLite และสร้าง Queue รอ Sync"""
+        """แก้ Location ของ COUNT ที่ยังไม่ Sync และปรับ Queue เดิมเท่านั้น."""
         ids = [int(value) for value in history_ids]
         if not ids:
             return {"updated": 0}
@@ -410,102 +532,88 @@ class CountRepository(BaseRepository):
 
         try:
             connection.execute("BEGIN IMMEDIATE")
-
-            cursor.execute(
+            rows = cursor.execute(
                 f"""
-                SELECT
-                    h.history_id, h.plan_id, h.plan_detail_id, h.item_id,
-                    h.barcode, h.qty, h.transaction_guid
-                FROM tbt_count_history AS h
-                WHERE h.plan_id = ?
-                  AND h.history_id IN ({placeholders})
-                  AND COALESCE(h.is_audit, 0) = 0
+                SELECT *
+                FROM tbt_count_history
+                WHERE plan_id = ?
+                  AND history_id IN ({placeholders})
+                  AND COALESCE(is_audit, 0) = 0
                 """,
-                [plan_id, *ids],
-            )
-            rows = cursor.fetchall()
+                [int(plan_id), *ids],
+            ).fetchall()
 
             if len(rows) != len(ids):
                 raise ValueError("พบบางรายการไม่ครบหรือไม่อยู่ใน Plan นี้")
 
             updated_details = set()
-
             for row in rows:
-                history_id = row["history_id"]
-                plan_detail_id = row["plan_detail_id"]
+                history_id = int(row["history_id"])
+                queue = self._get_editable_queue(cursor, history_id)
+                payload = self._queue_payload(queue)
+                payload.update({
+                    "history_id": history_id,
+                    "transaction_guid": str(row["transaction_guid"]),
+                    "reference_transaction_guid": None,
+                    "transaction_type": "COUNT",
+                    "operation_type": "INSERT",
+                    "location_id": int(new_location_id),
+                    "location_code": str(new_location_code or "").strip(),
+                    "checker": str(checker or ""),
+                    "is_audit": 0,
+                    "audit_round": 0,
+                    "modified_at": now,
+                })
+                payload.pop("correction_type", None)
 
                 cursor.execute(
                     """
                     UPDATE tbt_count_history
-                    SET location_id = ?, checker = ?
+                    SET reference_transaction_guid=NULL,
+                        operation_type='INSERT',
+                        location_id = ?, checker = ?
                     WHERE history_id = ?
                     """,
-                    (new_location_id, checker, history_id),
+                    (int(new_location_id), checker, history_id),
                 )
 
+                plan_detail_id = int(row["plan_detail_id"])
                 if plan_detail_id not in updated_details:
                     cursor.execute(
                         """
                         UPDATE tb_plan_detail
-                        SET location_id = ?,
-                            new_location = ?,
-                            is_change_location = 1,
-                            checker = ?,
+                        SET location_id = ?, new_location = ?,
+                            is_change_location = 1, checker = ?,
                             count_sync_status = 'PENDING',
-                            count_modified_at = ?,
-                            local_is_changed = 1,
-                            local_sync_status = 'PENDING',
-                            local_updated_at = ?
-                        WHERE plan_detail_id = ?
-                          AND plan_id = ?
+                            count_modified_at = ?, local_is_changed = 1,
+                            local_sync_status = 'PENDING', local_updated_at = ?
+                        WHERE plan_detail_id = ? AND plan_id = ?
                         """,
                         (
-                            new_location_id, new_location_code, checker, now,
-                            now, plan_detail_id, plan_id,
+                            int(new_location_id), str(new_location_code or "").strip(),
+                            checker, now, now, plan_detail_id, int(plan_id),
                         ),
                     )
                     updated_details.add(plan_detail_id)
 
-                queue_guid = str(uuid.uuid4())
-                payload = {
-                    "history_id": history_id,
-                    "plan_id": plan_id,
-                    "plan_detail_id": plan_detail_id,
-                    "item_id": row["item_id"],
-                    "barcode": row["barcode"],
-                    "qty": row["qty"],
-                    "location_id": new_location_id,
-                    "location_code": new_location_code,
-                    "checker": checker,
-                    "correction_type": "LOCATION",
-                    "operation_type": "UPDATE_LOCATION",
-                    "reference_transaction_guid": row["transaction_guid"],
-                    "modified_at": now,
-                }
-
                 cursor.execute(
                     """
-                    INSERT INTO tb_sync_queue
-                        (plan_id, plan_detail_id, transaction_guid, sync_type,
-                         transaction_type, source_table, source_id, payload_json,
-                         sync_status, retry_count, create_date, created_at)
-                    VALUES (?, ?, ?, 'CORRECTION_LOCATION',
-                            'CORRECTION_LOCATION', 'tbt_count_history', ?, ?,
-                            'PENDING', 0, ?, ?)
+                    UPDATE tb_sync_queue
+                    SET payload_json = ?, sync_status = 'PENDING',
+                        retry_count = 0, error_message = NULL,
+                        last_attempt_at = NULL, synced_at = NULL
+                    WHERE queue_id = ?
                     """,
-                    (
-                        plan_id, plan_detail_id, queue_guid, history_id,
-                        json.dumps(payload, ensure_ascii=False), now, now,
-                    ),
+                    (json.dumps(payload, ensure_ascii=False), queue["queue_id"]),
                 )
 
             connection.commit()
             return {
+                "success": True,
                 "updated": len(rows),
-                "location_id": new_location_id,
-                "location_code": new_location_code,
+                "location_id": int(new_location_id),
+                "location_code": str(new_location_code or "").strip(),
             }
-
         except Exception:
             connection.rollback()
             raise

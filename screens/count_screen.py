@@ -15,6 +15,8 @@ from kivy.clock import Clock
 from kivy.uix.button import Button
 from kivy.utils import platform
 from kivymd.uix.screen import MDScreen
+from kivymd.uix.dialog import MDDialog
+from kivymd.uix.button import MDFlatButton, MDRaisedButton
 
 from services.count_service import CountService
 from services.sync_service import SyncService
@@ -32,6 +34,16 @@ class CountScreen(MDScreen):
     current_item = None
     _is_processing = False
     _sync_status_in_flight = False
+    is_changing_location = False
+    _previous_location = None
+    _previous_location_data = None
+    _verify_location_active = False
+    _verify_location_count = 0
+    _verify_expect = "LOCATION"
+    _verify_scanned_location = None
+    _verify_item = None
+    _verify_barcode = None
+    _verify_dialog = None
 
     # =====================================================
     # Screen Enter
@@ -42,6 +54,9 @@ class CountScreen(MDScreen):
         self.current_location = None
         self.current_item = None
         self._is_processing = False
+        self.is_changing_location = False
+        self._previous_location = None
+        self._previous_location_data = None
         app = App.get_running_app()
         self.correction_selection_mode = str(
             getattr(app, "correction_mode", "QTY") or "QTY"
@@ -56,6 +71,8 @@ class CountScreen(MDScreen):
         self.ids.lbl_location.text = (
             "กรุณายิง Barcode Location"
         )
+        self.ids.btn_change_location.text = "เปลี่ยน"
+        self._set_scan_prompt("LOCATION")
 
         self.ids.lbl_status.text = (
             "กำลังตรวจสอบข้อมูล Plan..."
@@ -321,7 +338,7 @@ class CountScreen(MDScreen):
         self.ids.txt_qty.disabled = not enabled
         self.ids.btn_calculator.disabled = not enabled
         self.ids.btn_change_location.disabled = (
-            not enabled
+            (not enabled) or (not self.current_location)
         )
 
         # เปิดเมื่อพบสินค้าแล้วเท่านั้น
@@ -374,17 +391,12 @@ class CountScreen(MDScreen):
 
         try:
 
-            if not self.current_location:
-
-                self.scan_location(
-                    scan_value
-                )
-
+            if self._verify_location_active:
+                self._verify_location_scan(scan_value)
+            elif self.is_changing_location or not self.current_location:
+                self.scan_location(scan_value)
             else:
-
-                self.scan_item(
-                    scan_value
-                )
+                self.scan_item(scan_value)
 
         except ValueError as error:
 
@@ -409,7 +421,9 @@ class CountScreen(MDScreen):
     # Scan Location
     # =====================================================
     def scan_location(self, location_code):
-        
+
+        changing_location = bool(self.is_changing_location)
+
         location_code = str(
             location_code or ""
         ).strip()
@@ -454,11 +468,12 @@ class CountScreen(MDScreen):
 
         except Exception as error:
 
-            self.current_location = None
-
-            self.ids.lbl_location.text = (
-                "กรุณายิง Barcode Location"
-            )
+            if not changing_location:
+                self.current_location = None
+                self.current_location_data = None
+                self.ids.lbl_location.text = (
+                    "กรุณายิง Barcode Location"
+                )
 
             self.ids.lbl_status.text = (
                 f"ค้นหา Location ไม่สำเร็จ: {error}"
@@ -470,11 +485,12 @@ class CountScreen(MDScreen):
 
         if not location:
 
-            self.current_location = None
-
-            self.ids.lbl_location.text = (
-                "กรุณายิง Barcode Location"
-            )
+            if not changing_location:
+                self.current_location = None
+                self.current_location_data = None
+                self.ids.lbl_location.text = (
+                    "กรุณายิง Barcode Location"
+                )
 
             self.ids.lbl_status.text = (
                 f"ไม่พบ Location: {location_code} "
@@ -496,8 +512,9 @@ class CountScreen(MDScreen):
             location_id = 0
 
         if location_id <= 0:
-            self.current_location = None
-            self.current_location_data = None
+            if not changing_location:
+                self.current_location = None
+                self.current_location_data = None
             self.ids.lbl_status.text = (
                 "Location ไม่มี Server ID กรุณาล้างข้อมูลในเครื่อง "
                 "แล้ว Download Plan ใหม่"
@@ -529,11 +546,17 @@ class CountScreen(MDScreen):
 
         self.ids.lbl_location.text = location_text
 
+        self.is_changing_location = False
+        self._previous_location = None
+        self._previous_location_data = None
+        self.ids.btn_change_location.text = "เปลี่ยน"
         self.ids.btn_change_location.disabled = False
+        self._set_scan_prompt("ITEM")
 
         self.ids.lbl_status.text = (
-            "พบ Location แล้ว "
-            "กรุณายิง Barcode สินค้า"
+            "เปลี่ยน Location สำเร็จ กรุณายิง Barcode สินค้า"
+            if changing_location
+            else "พบ Location แล้ว กรุณายิง Barcode สินค้า"
         )
 
         self.current_item = None
@@ -624,17 +647,15 @@ class CountScreen(MDScreen):
             self._reset_scan_field()
             return
 
-        if status == "UNEXPECTED_ITEM":
+        if status == "WRONG_LOCATION":
+            self._start_location_verification(result.get("item"), barcode)
+            return
 
+        if status == "UNEXPECTED_ITEM":
             self.current_item = None
             self._clear_item_display()
-
-            self.ids.lbl_status.text = (
-                "สินค้านี้ไม่มีใน Plan "
-                "หรือไม่อยู่ใน Location นี้"
-            )
+            self.ids.lbl_status.text = "สินค้านี้ไม่มีใน Plan"
             self.play_error_sound()
-
             self._reset_scan_field()
             return
 
@@ -706,6 +727,8 @@ class CountScreen(MDScreen):
         )
 
         self.ids.txt_qty.text = ""
+        # Verify mode จะ disable ช่อง Qty ไว้ เมื่อกลับเข้า READY ต้องเปิดกลับ
+        self.ids.txt_qty.disabled = False
         self.ids.btn_save.disabled = False
 
         self.ids.lbl_status.text = (
@@ -716,6 +739,152 @@ class CountScreen(MDScreen):
             self._focus_qty,
             0.1
         )
+
+    def _start_location_verification(self, item, barcode):
+        # 1 รอบยืนยัน = ยิง Location ก่อน แล้วจึงยิงสินค้า
+        # ต้องยืนยันคู่ Location + Item เดิมให้ครบ 3 รอบ
+        self._verify_location_active = True
+        self._verify_location_count = 0
+        self._verify_expect = "LOCATION"
+        self._verify_scanned_location = None
+        self._verify_item = item
+        self._verify_barcode = barcode
+        self.current_item = None
+        self._clear_item_display()
+        self.ids.btn_save.disabled = True
+        self.ids.txt_qty.text = ""
+        self.ids.txt_qty.disabled = True
+        self.ids.txt_barcode.hint_text = "ยิง Location ยืนยัน (1/3)"
+        self.ids.lbl_status.text = (
+            "สินค้าไม่อยู่ Location นี้ กรุณายิง Location เดิมก่อน (1/3)"
+        )
+        self._reset_scan_field()
+
+    def _verify_location_scan(self, scan_value):
+        """Verify Location -> Item 3 rounds; a valid Plan pair exits to normal flow immediately."""
+        service = CountService(App.get_running_app().db)
+        plan_id = self._row_value(self.current_plan, "plan_id")
+        round_no = self._verify_location_count + 1
+
+        if self._verify_expect == "LOCATION":
+            location = service.find_location(plan_id, scan_value)
+            if not location:
+                self._verify_location_count = 0
+                self._verify_scanned_location = None
+                self.ids.txt_barcode.hint_text = "ยิง Location ยืนยัน (1/3)"
+                self.ids.lbl_status.text = "ไม่พบ Location ใน Plan เริ่มยืนยันใหม่ (1/3)"
+                self.play_error_sound()
+                self._reset_scan_field()
+                return
+
+            self._verify_scanned_location = location
+            self._verify_expect = "ITEM"
+            self.ids.txt_barcode.hint_text = f"ยิง Barcode สินค้า ({round_no}/3)"
+            self.ids.lbl_status.text = f"พบ Location ใน Plan ({round_no}/3) กรุณายิง Barcode สินค้า"
+            self._reset_scan_field()
+            return
+
+        location = self._verify_scanned_location
+        location_id = int(self._row_value(location, "location_id", 0) or 0) if location else 0
+        result = service.prepare_item(plan_id=plan_id, location_id=location_id, barcode=scan_value)
+
+        # ถ้าคู่ Location + Item นี้มีอยู่ใน Plan จริง ให้ออกจาก Verify และกลับ Flow ปกติทันที
+        if isinstance(result, dict) and result.get("status") == "READY":
+            self._verify_location_active = False
+            self._verify_location_count = 0
+            self._verify_expect = "LOCATION"
+            self._verify_scanned_location = None
+            self._verify_item = None
+            self._verify_barcode = None
+            self.current_location = location_id
+            self.current_location_data = location
+            self.ids.lbl_location.text = str(
+                self._row_value(location, "location_code", "")
+                or self._row_value(location, "location_name", "")
+                or location_id
+            )
+            self.ids.btn_change_location.text = "เปลี่ยน"
+            self.ids.btn_change_location.disabled = False
+            self._set_scan_prompt("ITEM")
+            self.scan_item(scan_value)
+            return
+
+        scanned_item = result.get("item") if isinstance(result, dict) else None
+        expected_code = str(self._row_value(self._verify_item, "item_code", "") or "").strip()
+        scanned_code = str(self._row_value(scanned_item, "item_code", "") or "").strip() if scanned_item else ""
+        current_location_id = int(self.current_location or 0)
+
+        # การยืนยันต้องเป็นคู่ Location เดิม + Item เดิมเท่านั้น
+        if location_id != current_location_id or not scanned_item or not expected_code or scanned_code != expected_code:
+            self._verify_location_count = 0
+            self._verify_expect = "LOCATION"
+            self._verify_scanned_location = None
+            self.ids.txt_barcode.hint_text = "ยิง Location ยืนยัน (1/3)"
+            self.ids.lbl_status.text = "คู่ Location + สินค้าไม่ตรง เริ่มใหม่ กรุณายิง Location (1/3)"
+            self.play_error_sound()
+            self._reset_scan_field()
+            return
+
+        self._verify_barcode = scan_value
+        self._verify_location_count += 1
+        self._verify_scanned_location = None
+
+        if self._verify_location_count >= 3:
+            self._verify_expect = "LOCATION"
+            self._show_add_location_dialog()
+            return
+
+        next_round = self._verify_location_count + 1
+        self._verify_expect = "LOCATION"
+        self.ids.txt_barcode.hint_text = f"ยิง Location ยืนยัน ({next_round}/3)"
+        self.ids.lbl_status.text = (
+            f"ยืนยันคู่ Location + สินค้าแล้ว {self._verify_location_count}/3 "
+            f"กรุณายิง Location รอบ {next_round}/3"
+        )
+        self._reset_scan_field()
+
+    def _show_add_location_dialog(self):
+        item_code = self._row_value(self._verify_item, "item_code", "-")
+        loc = self.ids.lbl_location.text
+        self.ids.txt_barcode.disabled = True
+        self._verify_dialog = MDDialog(
+            title="ยืนยันเพิ่มสินค้าใน Location นี้",
+            text=f"สินค้า: {item_code}\nLocation: {loc}\nยืนยัน Location ครบ 3/3 ครั้ง",
+            buttons=[
+                MDFlatButton(text="ยกเลิก", font_name="ThaiFont", on_release=lambda *_: self._cancel_location_verification()),
+                MDRaisedButton(text="เพิ่ม Location นี้", font_name="ThaiFont", on_release=lambda *_: self._confirm_new_plan_detail()),
+            ],
+        )
+        self._verify_dialog.open()
+
+    def _cancel_location_verification(self):
+        if self._verify_dialog:
+            self._verify_dialog.dismiss(); self._verify_dialog = None
+        self._verify_location_active=False; self._verify_location_count=0; self._verify_expect="LOCATION"; self._verify_scanned_location=None; self._verify_item=None; self._verify_barcode=None
+        self.ids.txt_barcode.disabled=False; self._set_scan_prompt("ITEM")
+        self.ids.lbl_status.text="ยกเลิกการเพิ่ม Location กรุณายิง Barcode สินค้า"
+        self._reset_scan_field()
+
+    def _confirm_new_plan_detail(self):
+        try:
+            service=CountService(App.get_running_app().db)
+            detail=service.create_local_plan_detail(self._row_value(self.current_plan,"plan_id"), self._row_value(self._verify_item,"item_id"), self.current_location)
+            if not detail: raise ValueError("สร้าง Local Plan Detail ไม่สำเร็จ")
+            item=self._verify_item; barcode=self._verify_barcode
+            if self._verify_dialog: self._verify_dialog.dismiss(); self._verify_dialog=None
+            self._verify_location_active=False; self._verify_location_count=0; self._verify_expect="LOCATION"
+            self.current_item={"item":item,"detail":detail,"barcode":barcode}
+            self.ids.lbl_item_code.text=f"รหัสสินค้า: {self._row_value(item,'item_code','-')}"
+            self.ids.lbl_item_name.text=f"ชื่อสินค้า: {self._row_value(item,'item_name','-')}"
+            self.ids.lbl_unit.text=f"หน่วย: {self._row_value(item,'uom','-') or '-'}"
+            self.ids.txt_barcode.disabled=False; self.ids.txt_qty.disabled=False; self.ids.btn_save.disabled=False
+            self.ids.lbl_status.text="เพิ่ม Location แล้ว กรุณาระบุจำนวนและกดบันทึก"
+            self._verify_item=None; self._verify_barcode=None
+            Clock.schedule_once(self._focus_qty, .1)
+        except Exception as exc:
+            self.ids.txt_barcode.disabled=False
+            self.ids.lbl_status.text=f"เพิ่ม Location ไม่สำเร็จ: {exc}"
+            self._cancel_location_verification()
 
     # =====================================================
     # Prepare Item Fallback
@@ -944,39 +1113,75 @@ class CountScreen(MDScreen):
             self._is_processing = False
 
     # =====================================================
-    # Reset / Change Location
+    # Reset / Manual Change Location
     # =====================================================
-    def reset_location(
-        self,
-        show_message=True
-    ):
+    def _set_scan_prompt(self, mode):
+        mode = str(mode or "").upper()
+        if mode == "ITEM":
+            self.ids.txt_barcode.hint_text = "ยิง Barcode สินค้า"
+        elif mode == "CHANGE_LOCATION":
+            self.ids.txt_barcode.hint_text = "ยิง Location ใหม่"
+        else:
+            self.ids.txt_barcode.hint_text = "ยิง Location"
 
+    def toggle_change_location(self):
+        """เข้า/ยกเลิกโหมดเปลี่ยน Location โดยไม่ทิ้ง Location เดิมก่อนสำเร็จ"""
+        if self._verify_location_active:
+            self._cancel_location_verification()
+            return
+
+        if self.is_changing_location:
+            self.is_changing_location = False
+            self.current_location = self._previous_location
+            self.current_location_data = self._previous_location_data
+            self._previous_location = None
+            self._previous_location_data = None
+            self.ids.btn_change_location.text = "เปลี่ยน"
+            self._set_scan_prompt("ITEM" if self.current_location else "LOCATION")
+            self.ids.lbl_status.text = (
+                "ยกเลิกการเปลี่ยน Location กรุณายิง Barcode สินค้า"
+                if self.current_location
+                else "กรุณายิง Location"
+            )
+            self._reset_scan_field()
+            return
+
+        if not self.current_location:
+            self.ids.lbl_status.text = "กรุณายิง Location ก่อน"
+            self._set_scan_prompt("LOCATION")
+            self._reset_scan_field()
+            return
+
+        self._previous_location = self.current_location
+        self._previous_location_data = self.current_location_data
+        self.is_changing_location = True
+        self.current_item = None
+        self._clear_item_display()
+        self.ids.txt_qty.text = ""
+        self.ids.btn_save.disabled = True
+        self.ids.btn_change_location.text = "ยกเลิก"
+        self._set_scan_prompt("CHANGE_LOCATION")
+        self.ids.lbl_status.text = "กรุณายิง Location ใหม่"
+        self._reset_scan_field()
+
+    def reset_location(self, show_message=True):
         self.current_location = None
         self.current_location_data = None
         self.current_item = None
+        self.is_changing_location = False
+        self._previous_location = None
+        self._previous_location_data = None
 
-        self.ids.lbl_location.text = (
-            "กรุณายิง Barcode Location"
-        )
-
+        self.ids.lbl_location.text = "กรุณายิง Barcode Location"
+        self.ids.btn_change_location.text = "เปลี่ยน"
+        self.ids.btn_change_location.disabled = True
+        self._set_scan_prompt("LOCATION")
         self.ids.txt_qty.text = ""
-
         self._clear_item_display()
-
         self.ids.btn_save.disabled = True
 
-        # ปุ่มเปลี่ยน Location ยังเปิดไว้ได้
-        # เมื่อ Plan พร้อม
-        self.ids.btn_change_location.disabled = (
-            self.current_plan is None
-        )
-
         if show_message:
-
-            self.ids.lbl_status.text = (
-                "เปลี่ยน Location "
-                "กรุณายิง Barcode Location ใหม่"
-            )
+            self.ids.lbl_status.text = "กรุณายิง Location"
 
         self._reset_scan_field()
 
@@ -1091,6 +1296,11 @@ class CountScreen(MDScreen):
 
         row = dict(row)
         history_id = self._row_value(row, "history_id")
+        queue_status = str(self._row_value(row, "queue_status", "PENDING") or "PENDING").upper()
+        if queue_status not in ("PENDING", "ERROR"):
+            self.ids.lbl_status.text = "รายการนี้กำลัง Sync หรือ Sync แล้ว ไม่สามารถแก้ไขได้"
+            self.play_error_sound()
+            return
 
         # Mode LOCATION: เลือกได้หลายรายการ และยังไม่เปิด Correction ทันที
         if self.correction_selection_mode == "LOCATION":
@@ -1377,20 +1587,41 @@ class CountScreen(MDScreen):
             self.play_error_sound()
 
     def retry_sync(self):
-        """ส่ง PENDING และ ERROR ใหม่"""
+        """Retry ตามชนิด Error: Local Sync ERROR ก่อน, มิฉะนั้น Reprocess Server ERROR."""
         try:
             app, plan_id, device_name, sync_url, timeout, batch_size = self._sync_context()
             service = SyncService(app.db, timeout)
-            self.ids.lbl_sync_status.text = "กำลังส่งรายการ Error ใหม่..."
-            self._run_sync_worker(
-                lambda: service.retry_error(
-                    sync_url, plan_id, device_name,
-                    getattr(Config, "APP_VERSION", "1.0.0"), batch_size,
-                    transaction_type="COUNT",
-                ),
-                self._after_send,
-                "Retry",
-            )
+            local = service.local_summary(plan_id, "COUNT")
+            local_error = int(local.get("ERROR", 0) or 0)
+            server = getattr(self, "_server_sync_summary", {}) or {}
+            server_error = int(server.get("ERROR", 0) or 0)
+
+            if local_error > 0:
+                self.ids.lbl_sync_status.text = "กำลัง Retry Sync รายการ Error..."
+                self._run_sync_worker(
+                    lambda: service.retry_error(
+                        sync_url, plan_id, device_name,
+                        getattr(Config, "APP_VERSION", "1.0.0"), batch_size,
+                        transaction_type="COUNT",
+                    ),
+                    self._after_send,
+                    "Retry Sync",
+                )
+                return
+
+            if server_error > 0:
+                self.ids.lbl_sync_status.text = "กำลัง Retry Process รายการ Error..."
+                self._run_sync_worker(
+                    lambda: service.retry_process_error(
+                        sync_url, plan_id, device_name, "COUNT"
+                    ),
+                    self._after_process,
+                    "Retry Process",
+                )
+                return
+
+            self.ids.lbl_sync_status.text = "ไม่มีรายการ Error ที่ต้อง Retry"
+            self._update_sync_button_states()
         except Exception as error:
             self.ids.lbl_sync_status.text = f"Retry ไม่ได้: {error}"
             self.play_error_sound()
@@ -1523,13 +1754,18 @@ class CountScreen(MDScreen):
         local_error = int(local.get("ERROR", 0) or 0)
         waiting = int(server.get("WAITING", 0) or 0)
         processing = int(server.get("PROCESSING", 0) or 0)
+        server_error = int(server.get("ERROR", 0) or 0)
         server_loaded = bool(server.get("LOADED", False))
 
         if "btn_sync_now" in self.ids:
             self.ids.btn_sync_now.disabled = pending <= 0 or syncing > 0
 
         if "btn_retry_sync" in self.ids:
-            self.ids.btn_retry_sync.disabled = local_error <= 0 or syncing > 0
+            self.ids.btn_retry_sync.disabled = (
+                (local_error <= 0 and (not server_loaded or server_error <= 0))
+                or syncing > 0
+                or processing > 0
+            )
 
         if "btn_process_server" in self.ids:
             self.ids.btn_process_server.disabled = (

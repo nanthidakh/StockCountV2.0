@@ -25,6 +25,9 @@ class AuditService:
             return {"status": "ITEM_NOT_FOUND"}
         detail = self.repo.get_audit_detail(plan_id, item["item_id"], location_id)
         if not detail:
+            any_detail = self.repo.get_audit_detail_any_location(plan_id, item["item_id"])
+            if any_detail:
+                return {"status": "WRONG_LOCATION", "item": item, "detail": any_detail}
             return {"status": "UNEXPECTED_ITEM", "item": item}
         audit_round = int(detail.get("audit_round") or 0)
         if audit_round <= 0:
@@ -33,6 +36,13 @@ class AuditService:
             detail["audit_round"] = audit_round
         duplicate = self.repo.find_duplicate(plan_id, item["item_id"], location_id, audit_round)
         return {"status": "READY", "item": item, "detail": detail, "duplicate": duplicate}
+
+    def create_local_plan_detail(self, plan_id, item_id, location_id):
+        self.repo.create_local_plan_detail(plan_id, item_id, location_id)
+        detail = self.repo.get_audit_detail(plan_id, item_id, location_id)
+        if detail:
+            detail["audit_round"] = max(1, int(detail.get("audit_count") or 0) + 1)
+        return detail
 
     def save_audit(self, detail, item, location_id, scanned_barcode, qty, auditor, duplicate_mode="ADD"):
         tx = CountTransaction.create_audit(
