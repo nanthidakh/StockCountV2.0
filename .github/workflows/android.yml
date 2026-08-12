@@ -36,12 +36,13 @@ jobs:
       - name: Cache Buildozer downloads
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.buildozer
-            .buildozer
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            ${{ runner.os }}-buildozer-
+          path: ~/.buildozer
+          key: ${{ runner.os }}-buildozer-downloads-${{ hashFiles('buildozer.spec') }}
+
+      - name: Clean old Android build
+        run: |
+          rm -rf .buildozer/android/platform/build-*
+          rm -rf .buildozer/android/app
 
       - name: Build debug APK
         run: buildozer -v android debug
