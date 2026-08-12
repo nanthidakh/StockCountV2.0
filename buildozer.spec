@@ -25,7 +25,7 @@ icon.filename = %(source.dir)s/barcode.png
 # Keep the known working p4a toolchain.
 # requests installs urllib3, certifi, idna and charset-normalizer.
 # ---------------------------------------------------------
-requirements = python3,kivy,kivymd,requests,pyjnius,materialyoucolor
+requirements = python3,kivy,kivymd==1.1.1,requests,pyjnius
 p4a.branch = release-2024.01.21
 
 # ---------------------------------------------------------
