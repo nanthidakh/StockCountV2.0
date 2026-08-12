@@ -268,7 +268,7 @@
                 height: "48dp"
                 spacing: "5dp"
 
-                MDTextField:
+                ScannerTextField:
                     id: txt_location
                     hint_text: "Location"
                     font_name: "ThaiFont"
@@ -288,7 +288,7 @@
                     md_bg_color: (0.16, 0.58, 0.28, 1) if root.location_locked else app.theme_cls.primary_color
                     on_release: root.toggle_location_lock()
 
-            MDTextField:
+            ScannerTextField:
                 id: txt_barcode
                 hint_text: "Barcode / Item Code"
                 font_name: "ThaiFont"

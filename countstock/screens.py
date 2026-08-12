@@ -14,7 +14,7 @@ from kivymd.uix.button import MDFlatButton, MDRaisedButton
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
 from kivymd.uix.textfield import MDTextField
-from screens.base_screen import BaseScreen
+from screens.base_screen import BaseScreen, ScannerTextField
 from countstock import database
 from countstock.sound import play_notification
 
@@ -206,10 +206,17 @@ class CountStockScanScreen(CountStockBaseScreen):
         return False
 
     def _keep_focus(self, widget):
-        """คง Focus และซ่อน Soft Keyboard แต่ยังรับ Hardware Scanner ได้."""
-        if not widget.focus:
-            widget.focus = True
-        Clock.schedule_once(lambda _dt: self._hide_android_keyboard(), 0.05)
+        """คืน Focus หลัง UI update โดยไม่ toggle focus และไม่เปิด Soft Keyboard."""
+        def _apply_focus(_dt):
+            try:
+                if not widget.focus:
+                    widget.focus = True
+                self._hide_android_keyboard()
+            except Exception:
+                pass
+
+        # รอ event จาก Enter / refresh_recent จบก่อน เพื่อไม่ให้ focus ถูก widget อื่นแย่ง
+        Clock.schedule_once(_apply_focus, 0.08)
 
     @staticmethod
     def _hide_android_keyboard():

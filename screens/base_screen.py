@@ -9,6 +9,30 @@ from kivy.clock import Clock
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDFlatButton
+from kivymd.uix.textfield import MDTextField
+
+
+class ScannerTextField(MDTextField):
+    """TextField สำหรับ Hardware Scanner: consume Enter ไม่ให้ไหลไป focus navigation."""
+
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        key_num = keycode[0] if isinstance(keycode, (tuple, list)) and keycode else keycode
+        key_name = (
+            str(keycode[1]).lower()
+            if isinstance(keycode, (tuple, list)) and len(keycode) > 1
+            else ""
+        )
+
+        # Scanner มักปิดท้ายด้วย Enter / Numpad Enter
+        # Dispatch on_text_validate เพียงครั้งเดียวแล้ว consume event ทันที
+        if key_num in (13, 271) or key_name in ("enter", "numpadenter", "kp_enter"):
+            if not self.disabled:
+                self.dispatch("on_text_validate")
+            return True
+
+        return super().keyboard_on_key_down(window, keycode, text, modifiers)
+
+
 class BaseScreen(MDScreen):
     dialog = None
     # =====================================================
