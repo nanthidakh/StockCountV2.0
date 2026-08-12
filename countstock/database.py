@@ -20,7 +20,8 @@ def get_db_path() -> str:
 def connect():
     conn = sqlite3.connect(get_db_path(), timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # journal_mode is configured once in init_db(). Re-running it for every
+    # scanner lookup/write adds unnecessary latency on Android devices.
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
@@ -29,6 +30,7 @@ def connect():
 def init_db():
     """Create the CountStock database for a clean installation."""
     with connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS db_config (
@@ -178,17 +180,38 @@ def get_product_stats():
 
 
 def find_product(value: str):
-    value = value.strip()
+    value = str(value or "").strip()
+    if not value:
+        return None
+
     with connect() as conn:
+        # Barcode is the primary key and is the fastest lookup path.
         row = conn.execute("""
             SELECT product_code, product_name, unit, barcode
-            FROM main_products WHERE barcode = ? LIMIT 1
+            FROM main_products
+            WHERE barcode = ?
+            LIMIT 1
         """, (value,)).fetchone()
+
+        # Exact product_code can use ix_main_products_code.
         if not row:
             row = conn.execute("""
                 SELECT product_code, product_name, unit, barcode
-                FROM main_products WHERE TRIM(product_code) = ? LIMIT 1
+                FROM main_products
+                WHERE product_code = ?
+                LIMIT 1
             """, (value,)).fetchone()
+
+        # Compatibility fallback for old imported data containing spaces.
+        # This path is only used when both indexed lookups above fail.
+        if not row:
+            row = conn.execute("""
+                SELECT product_code, product_name, unit, barcode
+                FROM main_products
+                WHERE TRIM(product_code) = ?
+                LIMIT 1
+            """, (value,)).fetchone()
+
         return dict(row) if row else None
 
 
@@ -222,28 +245,21 @@ def add_or_increment(location: str, staff: str, product_code: str, scanned_value
 
 
 def recent(limit=10):
+    """Return lightweight recent rows for the scanner screen.
+
+    Product name/unit are deliberately not joined here. The approved UI only
+    shows Location, scanned Barcode/Item Code and Qty, so avoiding two
+    correlated product subqueries keeps every scan refresh fast.
+    """
+    safe_limit = max(1, min(int(limit or 10), 100))
     with connect() as conn:
         return [dict(r) for r in conn.execute("""
-            SELECT s.id, s.location, s.staff_name, s.product_code,
-                   s.scanned_value, s.qty, s.scan_date, s.sync_status,
-                   s.sync_scan_data, s.sync_scan_slottag,
-                   COALESCE((
-                       SELECT p.product_name
-                       FROM main_products p
-                       WHERE TRIM(p.product_code) = TRIM(s.product_code)
-                       ORDER BY p.rowid
-                       LIMIT 1
-                   ), '') AS product_name,
-                   COALESCE((
-                       SELECT p.unit
-                       FROM main_products p
-                       WHERE TRIM(p.product_code) = TRIM(s.product_code)
-                       ORDER BY p.rowid
-                       LIMIT 1
-                   ), '') AS unit
-            FROM countstock_scan_data s
-            ORDER BY s.id DESC LIMIT ?
-        """, (limit,)).fetchall()]
+            SELECT id, location, staff_name, product_code, scanned_value, qty,
+                   scan_date, sync_status, sync_scan_data, sync_scan_slottag
+            FROM countstock_scan_data
+            ORDER BY id DESC
+            LIMIT ?
+        """, (safe_limit,)).fetchall()]
 
 
 def get_scan_stats():

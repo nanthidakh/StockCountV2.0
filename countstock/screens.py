@@ -14,7 +14,7 @@ from kivymd.uix.button import MDFlatButton, MDRaisedButton
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
 from kivymd.uix.textfield import MDTextField
-from screens.base_screen import BaseScreen, ScannerTextField
+from screens.base_screen import BaseScreen
 from countstock import database
 from countstock.sound import play_notification
 
@@ -162,6 +162,12 @@ class CountStockImportScreen(CountStockBaseScreen):
 
 
 class CountStockScanScreen(CountStockBaseScreen):
+    """CountStock scanner screen.
+
+    Scanner flow intentionally follows the original CountStock behavior:
+    Location -> Enter -> Barcode -> Enter -> Save -> Barcode focus.
+    """
+
     location_locked = BooleanProperty(False)
     _dialog = None
 
@@ -170,88 +176,96 @@ class CountStockScanScreen(CountStockBaseScreen):
 
     def on_enter(self, *args):
         self._load_staff_dropdown()
+        self._clear_product_display()
         self.refresh_recent()
+
+        # เปิดหน้าจอใหม่ให้เริ่มจาก Location เสมอ
+        self.location_locked = False
+        self.ids.txt_location.text = ""
+        self.ids.txt_barcode.text = ""
         self._update_location_lock_ui()
-        Clock.schedule_once(lambda _dt: self._focus_barcode(), .2)
+        Clock.schedule_once(lambda _dt: self._focus_location(), 0.20)
 
     def go_back(self):
         self._dismiss_dialog()
         self.manager.current = "countstock_menu"
 
-    def prepare_field(self, widget, touch, clear_value=True):
-        """แตะช่องแล้วเตรียมรับค่าจาก Scanner โดยไม่สลับ Focus ไปมา."""
-        if not widget.collide_point(*touch.pos):
-            return False
-        if getattr(touch, "is_mouse_scrolling", False):
-            return False
+    # =====================================================
+    # Staff
+    # =====================================================
+    def _load_staff_dropdown(self):
+        staff_list = database.get_staff_list()
+        if self.selected_staff not in staff_list:
+            self.selected_staff = ""
+        if "btn_staff" in self.ids:
+            self.ids.btn_staff.text = self.selected_staff or "-เลือก-"
 
-        if clear_value:
-            widget.text = ""
-        self._keep_focus(widget)
-        return False
-
-    def prepare_location_field(self, widget, touch):
-        if not widget.collide_point(*touch.pos):
-            return False
-        if getattr(touch, "is_mouse_scrolling", False):
-            return False
-
-        if self.location_locked:
-            self.ids.lbl_result.text = "Location ถูกล็อก กด 'ปลดล็อก LOC' ก่อนเปลี่ยน"
-            self._focus_barcode()
-            return True
-
-        widget.text = ""
-        self._keep_focus(widget)
-        return False
-
-    def _keep_focus(self, widget):
-        """คืน Focus หลัง UI update โดยไม่ toggle focus และไม่เปิด Soft Keyboard."""
-        def _apply_focus(_dt):
-            try:
-                if not widget.focus:
-                    widget.focus = True
-                self._hide_android_keyboard()
-            except Exception:
-                pass
-
-        # รอ event จาก Enter / refresh_recent จบก่อน เพื่อไม่ให้ focus ถูก widget อื่นแย่ง
-        Clock.schedule_once(_apply_focus, 0.08)
-
-    @staticmethod
-    def _hide_android_keyboard():
-        if platform != "android":
+    def open_staff_menu(self):
+        staff_list = database.get_staff_list()
+        if not staff_list:
+            self.show_error("ไม่พบ Staff กรุณาโหลด Config ใหม่")
             return
-        try:
-            from jnius import autoclass
 
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            Context = autoclass("android.content.Context")
-            activity = PythonActivity.mActivity
-            imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE)
-            view = activity.getWindow().getDecorView()
-            imm.hideSoftInputFromWindow(view.getWindowToken(), 0)
-        except Exception:
-            # การซ่อน keyboard ต้องไม่ทำให้หน้าสแกนหยุดทำงาน
-            pass
+        items = [{
+            "text": code,
+            "viewclass": "OneLineListItem",
+            "on_release": lambda code=code: self.select_staff(code),
+        } for code in staff_list]
 
+        self.staff_menu = MDDropdownMenu(
+            caller=self.ids.btn_staff,
+            items=items,
+            width_mult=2,
+        )
+        self.staff_menu.open()
+
+    def select_staff(self, code):
+        self.selected_staff = str(code).strip()
+        self.ids.btn_staff.text = self.selected_staff or "-เลือก-"
+
+        if self.staff_menu:
+            self.staff_menu.dismiss()
+
+        # Staff เลือกจาก Dropdown เท่านั้น จากนั้นกลับเข้า scanner flow เดิม
+        if self.location_locked and self.ids.txt_location.text.strip():
+            self._focus_barcode()
+        else:
+            self._focus_location()
+
+    # =====================================================
+    # Location: original two-field scanner behavior
+    # =====================================================
     def toggle_location_lock(self):
-        location = self.ids.txt_location.text.strip()
         if self.location_locked:
+            # Unlock = กลับไปยิง Location ที่ช่อง Location โดยตรง
             self.location_locked = False
             self.ids.txt_location.text = ""
-            self.ids.lbl_result.text = "ปลดล็อก Location แล้ว กรุณายิง Location ใหม่"
+            self.ids.txt_barcode.text = ""
+            self._clear_product_display()
             self._update_location_lock_ui()
-            self._focus_location(clear_value=False)
+            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
             return
+
+        # กด Lock เองได้ในกรณีพิมพ์ Location ด้วยมือ
+        self.on_location_validate()
+
+    def on_location_validate(self):
+        location = self.ids.txt_location.text.strip()
         if not location:
-            self.show_error("กรุณากรอก Location ก่อนล็อก")
-            self._focus_location(clear_value=False)
+            self.show_error("กรุณากรอก Location")
+            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
             return
+
+        if not self.selected_staff.strip():
+            self.show_error("กรุณาเลือก Staff")
+            self.open_staff_menu()
+            return
+
         self.location_locked = True
-        self.ids.lbl_result.text = f"ล็อก Location: {location}"
         self._update_location_lock_ui()
-        self._focus_barcode()
+
+        # Pattern เดียวกับ CountStock ตัวเดิม: Location Enter -> Barcode
+        Clock.schedule_once(lambda _dt: self._focus_barcode(), 0.10)
 
     def _update_location_lock_ui(self):
         if "btn_lock_location" in self.ids:
@@ -261,172 +275,153 @@ class CountStockScanScreen(CountStockBaseScreen):
         if "txt_location" in self.ids:
             self.ids.txt_location.readonly = self.location_locked
 
-    def _load_staff_dropdown(self):
-        staff_list = database.get_staff_list()
-        if self.selected_staff not in staff_list:
-            self.selected_staff = ""
-        if "btn_staff" in self.ids:
-            self.ids.btn_staff.text = self.selected_staff or "เลือก Staff"
-
-    def open_staff_menu(self):
-        staff_list = database.get_staff_list()
-        if not staff_list:
-            self.show_error("ไม่พบ Staff กรุณาโหลด Config ใหม่")
-            return
-        items = [{
-            "text": code,
-            "viewclass": "OneLineListItem",
-            "on_release": lambda code=code: self.select_staff(code),
-        } for code in staff_list]
-        self.staff_menu = MDDropdownMenu(
-            caller=self.ids.btn_staff, items=items, width_mult=2
-        )
-        self.staff_menu.open()
-
-    def select_staff(self, code):
-        self.selected_staff = str(code)
-        self.ids.btn_staff.text = self.selected_staff
-        if self.staff_menu:
-            self.staff_menu.dismiss()
-        if self.location_locked:
-            self._focus_barcode()
-        else:
-            self._focus_location(clear_value=False)
-
-    def on_location_validate(self):
-        if not self.ids.txt_location.text.strip():
-            self.show_error("กรุณากรอก Location")
-            self._focus_location(clear_value=False)
-            return
-        self.location_locked = True
-        self._update_location_lock_ui()
-        self._focus_barcode()
-
-    def scan(self):
-        value = self.ids.txt_barcode.text.strip()
-        if not value:
-            self._focus_barcode()
+    # =====================================================
+    # Barcode: original CountStock behavior
+    # =====================================================
+    def on_barcode_input(self):
+        barcode = self.ids.txt_barcode.text.strip()
+        if not barcode:
             return
 
+        # เคลียร์ก่อน process เหมือนตัวเดิม เพื่อลดโอกาส scanner ยิงซ้ำ
         self.ids.txt_barcode.text = ""
+        self.process_barcode(barcode)
+
+        # คืน focus หลัง UI update เสร็จ
+        Clock.schedule_once(lambda _dt: self.force_barcode_focus(), 0.20)
+
+    # รองรับชื่อ method เดิมในกรณีมี code อื่นเรียก scan()
+    def scan(self):
+        self.on_barcode_input()
+
+    def process_barcode(self, barcode):
         staff = self.selected_staff.strip()
         location = self.ids.txt_location.text.strip()
+        barcode = str(barcode or "").strip()
 
         if not staff:
             self.show_error("กรุณาเลือก Staff")
             self.open_staff_menu()
             return
-        if not location:
+
+        if not location or not self.location_locked:
+            self.show_error("กรุณายิง Location ก่อน")
             self.location_locked = False
             self._update_location_lock_ui()
-            self.show_error("กรุณากรอก Location")
-            self._focus_location(clear_value=True)
+            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
             return
-        if not self.location_locked:
-            self.location_locked = True
-            self._update_location_lock_ui()
 
-        product = database.find_product(value)
+        product = database.find_product(barcode)
         if not product:
-            self.ids.lbl_result.text = f"ไม่พบสินค้า: {value}"
-            self.show_error(f"ไม่พบ Barcode/Item Code [{value}]")
-            self._focus_barcode()
+            self.show_error(f"ไม่พบ Barcode/Item Code [{barcode}]")
+            self._clear_product_display()
             return
 
-        qty, duplicated = database.add_or_increment(
-            location, staff, product["product_code"], value
+        try:
+            qty, duplicated = database.add_or_increment(
+                location,
+                staff,
+                product["product_code"],
+                barcode,
+            )
+        except Exception as exc:
+            self.show_error(f"บันทึกไม่สำเร็จ\n{exc}")
+            return
+
+        self.ids.lbl_product_code.text = (
+            f"รหัสสินค้า : {product.get('product_code') or '-'}"
         )
-        prefix = "ยิงซ้ำ +1" if duplicated else "บันทึกแล้ว"
-        self.ids.lbl_result.text = (
-            f"{prefix}: {product['product_code']}\n"
-            f"{product['product_name']} | จำนวน {qty} {product.get('unit', '')}"
+        self.ids.lbl_product_name.text = (
+            f"ชื่อสินค้า : {product.get('product_name') or '-'}"
         )
+        unit = str(product.get("unit") or "").strip()
+        suffix = f" {unit}" if unit else ""
+        self.ids.lbl_qty.text = f"จำนวนสะสม : {qty}{suffix}"
+
         play_notification(success=True)
+
+        # Query 10 รายการครั้งเดียว แล้วสร้าง table แบบ lightweight
         self.refresh_recent()
-        self._focus_barcode()
 
-    def _focus_staff(self, clear_value=False):
-        # Staff ใช้ Dropdown แล้ว ไม่รับการพิมพ์จาก Scanner
-        if clear_value:
-            self.selected_staff = ""
-            if "btn_staff" in self.ids:
-                self.ids.btn_staff.text = "เลือก Staff"
-
-    def _focus_location(self, clear_value=False):
+    # =====================================================
+    # Focus - keep it simple like the working legacy version
+    # =====================================================
+    def _focus_location(self):
         if self.location_locked:
             self._focus_barcode()
             return
+
         widget = self.ids.txt_location
-        if clear_value:
-            widget.text = ""
-        self._keep_focus(widget)
+        if not widget.focus:
+            widget.focus = True
 
     def _focus_barcode(self):
         widget = self.ids.txt_barcode
         widget.text = ""
-        self._keep_focus(widget)
+        if not widget.focus:
+            widget.focus = True
 
+    def force_barcode_focus(self):
+        barcode = self.ids.txt_barcode
+        if not barcode.focus:
+            barcode.focus = True
+
+    def _clear_product_display(self):
+        if "lbl_product_code" in self.ids:
+            self.ids.lbl_product_code.text = "รหัสสินค้า : -"
+        if "lbl_product_name" in self.ids:
+            self.ids.lbl_product_name.text = "ชื่อสินค้า : -"
+        if "lbl_qty" in self.ids:
+            self.ids.lbl_qty.text = "จำนวนสะสม : -"
+
+    # =====================================================
+    # Recent 10 - lightweight 3-column table, no header
+    # =====================================================
     def refresh_recent(self):
-        self.ids.recent_list.clear_widgets()
+        table = self.ids.recent_list
+        table.clear_widgets()
+
         rows = database.recent(10)
         if not rows:
-            self.ids.recent_list.add_widget(MDLabel(
+            table.add_widget(MDLabel(
                 text="ยังไม่มีรายการ",
                 font_name="ThaiFont",
-                halign="center",
-                size_hint_y=None,
-                height="44dp",
+                font_size="11sp",
+                halign="left",
+                valign="middle",
             ))
+            table.add_widget(MDLabel(text=""))
+            table.add_widget(MDLabel(text=""))
             return
 
         for row in rows:
-            locked = database.row_has_been_synced(row)
-            product_name = str(row.get("product_name") or "-")[:100]
-            box = MDBoxLayout(
-                orientation="horizontal",
-                size_hint_y=None,
-                height="52dp",
-                spacing="2dp",
-                padding=("2dp", "1dp"),
-            )
-            detail = MDLabel(
-                text=(
-                    f"{row.get('location', '-')} | "
-                    f"{row.get('product_code', '-')}:"
-                    f"{product_name} Qty : {row.get('qty', 0)}\n"
-                ),
+            location = str(row.get("location") or "-")
+            scanned_value = str(row.get("scanned_value") or "-")
+            qty = str(row.get("qty") or 0)
+
+            table.add_widget(MDLabel(
+                text=location,
                 font_name="ThaiFont",
-                font_size="9sp",
+                font_size="10sp",
                 halign="left",
                 valign="middle",
-                text_size=(self.width, None),
+            ))
+            table.add_widget(MDLabel(
+                text=scanned_value,
+                font_name="ThaiFont",
+                font_size="10sp",
+                halign="left",
+                valign="middle",
                 shorten=True,
                 shorten_from="right",
-            )
-            box.add_widget(detail)
-
-            edit_button = MDFlatButton(
-                text="แก้ LOC",
+            ))
+            table.add_widget(MDLabel(
+                text=qty,
                 font_name="ThaiFont",
-                font_size="13sp",
-                size_hint_x=None,
-                width="56dp",
-                disabled=locked,
-            )
-            edit_button.bind(on_release=partial(self.open_edit_location, dict(row)))
-            box.add_widget(edit_button)
-
-            delete_button = MDFlatButton(
-                text="ลบ",
-                font_name="ThaiFont",
-                font_size="13sp",
-                size_hint_x=None,
-                width="36dp",
-                disabled=locked,
-            )
-            delete_button.bind(on_release=partial(self.confirm_delete, dict(row)))
-            box.add_widget(delete_button)
-            self.ids.recent_list.add_widget(box)
+                font_size="10sp",
+                halign="center",
+                valign="middle",
+            ))
 
     def open_edit_location(self, row, *_):
         if database.row_has_been_synced(row):
@@ -462,7 +457,6 @@ class CountStockScanScreen(CountStockBaseScreen):
             database.update_pending_location(row_id, new_location)
             self._dismiss_dialog()
             self.refresh_recent()
-            self.ids.lbl_result.text = f"แก้ Location เป็น {str(new_location).strip()} แล้ว"
             self._focus_barcode()
         except Exception as exc:
             self.show_error(str(exc))
@@ -497,7 +491,6 @@ class CountStockScanScreen(CountStockBaseScreen):
             database.delete_pending_row(row_id)
             self._dismiss_dialog()
             self.refresh_recent()
-            self.ids.lbl_result.text = "ลบรายการแล้ว"
             self._focus_barcode()
         except Exception as exc:
             self.show_error(str(exc))

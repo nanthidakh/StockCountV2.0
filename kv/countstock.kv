@@ -223,8 +223,9 @@
                 on_release: root.go_back()
 
             MDLabel:
-                text: "เก็บข้อมูลรายการสินค้า"
+                text: "COUNT STOCK"
                 font_name: "ThaiFont"
+                bold: True
                 halign: "center"
                 theme_text_color: "Custom"
                 text_color: 1, 1, 1, 1
@@ -236,11 +237,11 @@
         MDBoxLayout:
             orientation: "vertical"
             padding: "10dp"
-            spacing: "6dp"
+            spacing: "7dp"
 
             MDBoxLayout:
                 size_hint_y: None
-                height: "48dp"
+                height: "46dp"
                 spacing: "8dp"
 
                 MDLabel:
@@ -257,18 +258,25 @@
                     text: "-เลือก-"
                     font_name: "ThaiFont"
                     size_hint_x: None
-                    width: "145dp"
+                    width: "155dp"
                     md_bg_color: 1.0, 0.55, 0.0, 1
                     on_release: root.open_staff_menu()
 
                 Widget:
 
+            MDLabel:
+                text: "Location"
+                font_name: "ThaiFont"
+                font_size: "12sp"
+                size_hint_y: None
+                height: "20dp"
+
             MDBoxLayout:
                 size_hint_y: None
                 height: "48dp"
-                spacing: "5dp"
+                spacing: "6dp"
 
-                ScannerTextField:
+                MDTextField:
                     id: txt_location
                     hint_text: "Location"
                     font_name: "ThaiFont"
@@ -276,7 +284,6 @@
                     multiline: False
                     write_tab: False
                     readonly: root.location_locked
-                    on_touch_down: root.prepare_location_field(self, args[1])
                     on_text_validate: root.on_location_validate()
 
                 MDRaisedButton:
@@ -288,7 +295,14 @@
                     md_bg_color: (0.16, 0.58, 0.28, 1) if root.location_locked else app.theme_cls.primary_color
                     on_release: root.toggle_location_lock()
 
-            ScannerTextField:
+            MDLabel:
+                text: "Barcode / Item Code"
+                font_name: "ThaiFont"
+                font_size: "12sp"
+                size_hint_y: None
+                height: "20dp"
+
+            MDTextField:
                 id: txt_barcode
                 hint_text: "Barcode / Item Code"
                 font_name: "ThaiFont"
@@ -297,37 +311,59 @@
                 write_tab: False
                 size_hint_y: None
                 height: "48dp"
-                on_touch_down: root.prepare_field(self, args[1], True)
-                on_text_validate: root.scan()
+                on_text_validate: root.on_barcode_input()
 
-            MDLabel:
-                id: lbl_result
-                text: "พร้อมสแกน"
-                font_name: "ThaiFont"
-                font_size: "13sp"
-                halign: "center"
-                valign: "middle"
-                text_size: self.width, None
+            MDBoxLayout:
+                orientation: "vertical"
                 size_hint_y: None
-                height: "56dp"
+                height: "82dp"
+                spacing: "1dp"
+                padding: "2dp", "2dp"
+
+                MDLabel:
+                    id: lbl_product_code
+                    text: "รหัสสินค้า : -"
+                    font_name: "ThaiFont"
+                    font_size: "12sp"
+                    size_hint_y: None
+                    height: "24dp"
+
+                MDLabel:
+                    id: lbl_product_name
+                    text: "ชื่อสินค้า : -"
+                    font_name: "ThaiFont"
+                    font_size: "12sp"
+                    shorten: True
+                    shorten_from: "right"
+                    size_hint_y: None
+                    height: "28dp"
+
+                MDLabel:
+                    id: lbl_qty
+                    text: "จำนวนสะสม : -"
+                    font_name: "ThaiFont"
+                    font_size: "12sp"
+                    size_hint_y: None
+                    height: "24dp"
 
             MDLabel:
-                text: "รายการล่าสุด — แก้ LOC/ลบได้เฉพาะรายการที่ยังไม่ Sync"
+                text: "รายการล่าสุด"
                 font_name: "ThaiFont"
                 bold: True
                 font_size: "13sp"
                 size_hint_y: None
-                height: "28dp"
+                height: "26dp"
 
             ScrollView:
                 do_scroll_x: False
 
-                MDBoxLayout:
+                GridLayout:
                     id: recent_list
-                    orientation: "vertical"
-                    font_size: "13sp"
+                    cols: 3
                     size_hint_y: None
                     height: self.minimum_height
+                    row_default_height: "30dp"
+                    row_force_default: True
                     spacing: "2dp"
 
 <CountStockExportScreen>:
