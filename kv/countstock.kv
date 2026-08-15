@@ -264,54 +264,58 @@
 
                 Widget:
 
-            MDLabel:
-                text: "Location"
-                font_name: "ThaiFont"
-                font_size: "12sp"
-                size_hint_y: None
-                height: "20dp"
-
             MDBoxLayout:
                 size_hint_y: None
-                height: "48dp"
+                height: "30dp"
                 spacing: "6dp"
 
-                MDTextField:
-                    id: txt_location
-                    hint_text: "Location"
+                MDLabel:
+                    text: "Location"
                     font_name: "ThaiFont"
-                    mode: "rectangle"
-                    multiline: False
-                    write_tab: False
-                    readonly: root.location_locked
-                    on_text_validate: root.on_location_validate()
+                    font_size: "12sp"
+                    bold: True
+                    valign: "middle"
+                    text_size: self.size
 
                 MDRaisedButton:
-                    id: btn_lock_location
-                    text: "ล็อก LOC"
+                    text: "เปลี่ยน LOC"
                     font_name: "ThaiFont"
                     size_hint_x: None
                     width: "105dp"
-                    md_bg_color: (0.16, 0.58, 0.28, 1) if root.location_locked else app.theme_cls.primary_color
-                    on_release: root.toggle_location_lock()
+                    height: "30dp"
+                    md_bg_color: app.theme_cls.primary_color
+                    on_release: root.change_location()
 
             MDLabel:
-                text: "Barcode / Item Code"
+                id: lbl_location
+                text: root.current_location if root.current_location else "-"
                 font_name: "ThaiFont"
-                font_size: "12sp"
+                font_size: "18sp"
+                bold: True
                 size_hint_y: None
-                height: "20dp"
+                height: "34dp"
+                valign: "middle"
+                text_size: self.size
+
+            MDLabel:
+                id: lbl_scan_guide
+                text: root.scan_guide_text
+                font_name: "ThaiFont"
+                font_size: "14sp"
+                bold: True
+                size_hint_y: None
+                height: "24dp"
 
             MDTextField:
-                id: txt_barcode
-                hint_text: "Barcode / Item Code"
+                id: txt_scan
+                hint_text: root.scan_hint_text
                 font_name: "ThaiFont"
                 mode: "rectangle"
                 multiline: False
                 write_tab: False
                 size_hint_y: None
                 height: "48dp"
-                on_text_validate: root.on_barcode_input()
+                on_text_validate: root.on_scan_input()
 
             MDBoxLayout:
                 orientation: "vertical"
@@ -413,7 +417,7 @@
                 height: "30dp"
             MDRaisedButton:
                 id: btn_export_scan_data
-                text: "เก็บข้อมูลพร้อมขอ Slottag"
+                text: "เก็บข้อมูล+ขอ Slottag"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 size_hint: 1, None
@@ -422,7 +426,7 @@
 
             MDRaisedButton:
                 id: btn_export_slottag
-                text: "ขอ Slottag อย่างเดียว"
+                text: "ขอ Slottag (ยังไม่เก็บข้อมูล)"
                 font_name: "ThaiFont"
                 font_size: "14sp"
                 size_hint: 1, None

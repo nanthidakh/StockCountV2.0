@@ -6,9 +6,10 @@ from functools import partial
 from kivy.app import App
 from kivy.utils import platform
 from kivy.clock import Clock
+from kivy.metrics import dp
 from kivy.factory import Factory
 from kivy.uix.behaviors import ButtonBehavior
-from kivy.properties import BooleanProperty
+from kivy.properties import BooleanProperty, StringProperty
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDFlatButton, MDRaisedButton
@@ -168,13 +169,15 @@ class CountStockImportScreen(CountStockBaseScreen):
 
 
 class CountStockScanScreen(CountStockBaseScreen):
-    """CountStock scanner screen.
+    """CountStock scanner screen using one scanner TextField.
 
-    Scanner flow intentionally follows the original CountStock behavior:
-    Location -> Enter -> Barcode -> Enter -> Save -> Barcode focus.
+    Flow: Staff -> scan Location -> scan Barcode/Item Code continuously.
     """
 
     location_locked = BooleanProperty(False)
+    current_location = StringProperty("")
+    scan_guide_text = StringProperty("กรุณายิง LOCATION")
+    scan_hint_text = StringProperty("ยิง LOCATION แล้วกด Enter")
     _dialog = None
 
     staff_menu = None
@@ -185,12 +188,13 @@ class CountStockScanScreen(CountStockBaseScreen):
         self._clear_product_display()
         self.refresh_recent()
 
-        # เปิดหน้าจอใหม่ให้เริ่มจาก Location เสมอ
+        # เปิดหน้าจอใหม่ให้รอ Location ที่ช่อง Scan เดียว
+        self.current_location = ""
         self.location_locked = False
-        self.ids.txt_location.text = ""
-        self.ids.txt_barcode.text = ""
-        self._update_location_lock_ui()
-        Clock.schedule_once(lambda _dt: self._focus_location(), 0.20)
+        self._set_scan_mode_location()
+        if "txt_scan" in self.ids:
+            self.ids.txt_scan.text = ""
+        Clock.schedule_once(lambda _dt: self._focus_scan(), 0.20)
 
     def go_back(self):
         self._dismiss_dialog()
@@ -232,76 +236,79 @@ class CountStockScanScreen(CountStockBaseScreen):
         if self.staff_menu:
             self.staff_menu.dismiss()
 
-        # เปลี่ยน Staff แล้วต้องกลับมาที่ Location เสมอ
-        # ไม่ซ่อน Soft Keyboard และไม่ย้ายไป Barcode เอง
+        # เปลี่ยน Staff แล้วให้เริ่มรับ Location ใหม่ใน Scan ช่องเดียว
+        self.current_location = ""
         self.location_locked = False
-        self._update_location_lock_ui()
-        Clock.schedule_once(lambda _dt: self._focus_location(), 0.05)
+        self._set_scan_mode_location()
+        self._clear_product_display()
+        if "txt_scan" in self.ids:
+            self.ids.txt_scan.text = ""
+        Clock.schedule_once(lambda _dt: self._focus_scan(), 0.05)
 
     # =====================================================
-    # Location: original two-field scanner behavior
+    # Single scan flow: Location -> Barcode -> Barcode ...
     # =====================================================
+    def change_location(self):
+        """กดเปลี่ยน LOC แล้ว Scan ครั้งถัดไปจะถูกใช้เป็น Location ใหม่."""
+        self.current_location = ""
+        self.location_locked = False
+        self._set_scan_mode_location()
+        self._clear_product_display()
+        if "txt_scan" in self.ids:
+            self.ids.txt_scan.text = ""
+        Clock.schedule_once(lambda _dt: self._focus_scan(), 0.05)
+
+    def _set_scan_mode_location(self):
+        self.scan_guide_text = "กรุณายิง LOCATION"
+        self.scan_hint_text = "ยิง LOCATION แล้วกด Enter"
+
+    def _set_scan_mode_barcode(self):
+        self.scan_guide_text = "กรุณายิง BARCODE / ITEM CODE"
+        self.scan_hint_text = "ยิง BARCODE / ITEM CODE แล้วกด Enter"
+
+    # compatibility with old KV/calls while moving to single scan field
     def toggle_location_lock(self):
-        if self.location_locked:
-            # ปลดล็อก LOC -> ให้ผู้ใช้ยิง/พิมพ์ Location ใหม่ที่ txt_location
-            self.location_locked = False
-            self.ids.txt_location.text = ""
-            self.ids.txt_barcode.text = ""
-            self._clear_product_display()
-            self._update_location_lock_ui()
-            Clock.schedule_once(lambda _dt: self._focus_location(), 0.05)
+        self.change_location()
+
+    def on_scan_input(self):
+        widget = self.ids.txt_scan
+        value = widget.text.strip()
+        if not value:
             return
 
-        # กดล็อก LOC เองได้ กรณีพิมพ์ Location ด้วยมือ
-        self.on_location_validate()
-
-    def on_location_validate(self):
-        location = self.ids.txt_location.text.strip()
-        if not location:
-            self.show_error("กรุณากรอก Location")
-            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
-            return
+        # เคลียร์ก่อน process เพื่อลดโอกาส scanner ยิงซ้ำ
+        widget.text = ""
 
         if not self.selected_staff.strip():
             self.show_error("กรุณาเลือก Staff")
             self.open_staff_menu()
             return
 
-        # ยิง Location + Enter สำเร็จ -> ล็อก Location แล้วไป Barcode
-        self.location_locked = True
-        self._update_location_lock_ui()
-        Clock.schedule_once(lambda _dt: self._focus_barcode(), 0.05)
-
-    def _update_location_lock_ui(self):
-        if "btn_lock_location" in self.ids:
-            self.ids.btn_lock_location.text = (
-                "ปลดล็อก LOC" if self.location_locked else "ล็อก LOC"
-            )
-        if "txt_location" in self.ids:
-            self.ids.txt_location.readonly = self.location_locked
-
-    # =====================================================
-    # Barcode: original CountStock behavior
-    # =====================================================
-    def on_barcode_input(self):
-        barcode = self.ids.txt_barcode.text.strip()
-        if not barcode:
+        # ยังไม่มี Location -> Scan ครั้งนี้คือ Location
+        if not self.current_location.strip() or not self.location_locked:
+            self._set_location(value)
+            Clock.schedule_once(lambda _dt: self._focus_scan(), 0.05)
             return
 
-        # เคลียร์ก่อน process เหมือนตัวเดิม เพื่อลดโอกาส scanner ยิงซ้ำ
-        self.ids.txt_barcode.text = ""
-        self.process_barcode(barcode)
-
-        # คืน focus หลัง UI update เสร็จ
-        Clock.schedule_once(lambda _dt: self.force_barcode_focus(), 0.20)
+        # มี Location แล้ว -> Scan ครั้งนี้คือ Barcode / Item Code
+        self.process_barcode(value)
+        Clock.schedule_once(lambda _dt: self.force_scan_focus(), 0.20)
 
     # รองรับชื่อ method เดิมในกรณีมี code อื่นเรียก scan()
     def scan(self):
-        self.on_barcode_input()
+        self.on_scan_input()
+
+    def _set_location(self, location):
+        location = str(location or "").strip()
+        if not location:
+            return
+        self.current_location = location
+        self.location_locked = True
+        self._set_scan_mode_barcode()
 
     def process_barcode(self, barcode):
         staff = self.selected_staff.strip()
-        location = self.ids.txt_location.text.strip()
+        location = self.current_location.strip()
         barcode = str(barcode or "").strip()
 
         if not staff:
@@ -311,9 +318,7 @@ class CountStockScanScreen(CountStockBaseScreen):
 
         if not location or not self.location_locked:
             self.show_error("กรุณายิง Location ก่อน")
-            self.location_locked = False
-            self._update_location_lock_ui()
-            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
+            self.change_location()
             return
 
         product = database.find_product(barcode)
@@ -344,37 +349,34 @@ class CountStockScanScreen(CountStockBaseScreen):
         self.ids.lbl_qty.text = f"จำนวนสะสม : {qty}{suffix}"
 
         play_notification(success=True)
-
-        # Query 10 รายการครั้งเดียว แล้วสร้าง table แบบ lightweight
         self.refresh_recent()
 
     # =====================================================
-    # Focus - keep it simple like the working legacy version
+    # Focus - Scanner TextField เดียว
     # =====================================================
-    def _focus_location(self):
-        if self.location_locked:
+    def _focus_scan(self):
+        if "txt_scan" not in self.ids:
             return
-
-        # เปลี่ยน focus แบบชัดเจน: Barcode -> Location
-        self.ids.txt_barcode.focus = False
-        self.ids.txt_location.focus = True
-
-    def _focus_barcode(self):
-        # Location ถูกล็อกแล้ว Barcode เป็นช่องรับ Scanner หลัก
-        self.ids.txt_location.focus = False
-        widget = self.ids.txt_barcode
+        widget = self.ids.txt_scan
         widget.text = ""
         widget.focus = True
 
-    def force_barcode_focus(self):
-        # หลัง Scan ให้ Barcode คง focus ต่อเนื่อง
-        # แต่ถ้าผู้ใช้แตะ Location เองแล้ว ห้ามดึง focus กลับ
-        if self.ids.txt_location.focus:
+    def force_scan_focus(self):
+        if "txt_scan" not in self.ids:
             return
+        widget = self.ids.txt_scan
+        if not widget.focus:
+            widget.focus = True
 
-        barcode = self.ids.txt_barcode
-        if not barcode.focus:
-            barcode.focus = True
+    # compatibility aliases for old internal calls
+    def _focus_location(self):
+        self._focus_scan()
+
+    def _focus_barcode(self):
+        self._focus_scan()
+
+    def force_barcode_focus(self):
+        self.force_scan_focus()
 
     def _clear_product_display(self):
         if "lbl_product_code" in self.ids:
@@ -385,7 +387,8 @@ class CountStockScanScreen(CountStockBaseScreen):
             self.ids.lbl_qty.text = "จำนวนสะสม : -"
 
     # =====================================================
-    # Recent 10 - lightweight 3-column table, no header
+    # Recent 10 - PENDING only, no header
+    # Location ~12 chars | Barcode uses remaining width | Qty ~8 chars
     # =====================================================
     def refresh_recent(self):
         table = self.ids.recent_list
@@ -399,9 +402,11 @@ class CountStockScanScreen(CountStockBaseScreen):
                 font_size="11sp",
                 halign="left",
                 valign="middle",
+                size_hint_x=None,
+                width=dp(88),
             ))
             table.add_widget(MDLabel(text=""))
-            table.add_widget(MDLabel(text=""))
+            table.add_widget(MDLabel(text="", size_hint_x=None, width=dp(58)))
             return
 
         for row in rows:
@@ -416,6 +421,10 @@ class CountStockScanScreen(CountStockBaseScreen):
                     font_size="10sp",
                     halign="left",
                     valign="middle",
+                    shorten=True,
+                    shorten_from="right",
+                    size_hint_x=None,
+                    width=dp(88),
                 ),
                 RecentClickableLabel(
                     text=scanned_value,
@@ -425,13 +434,16 @@ class CountStockScanScreen(CountStockBaseScreen):
                     valign="middle",
                     shorten=True,
                     shorten_from="right",
+                    size_hint_x=1,
                 ),
                 RecentClickableLabel(
                     text=qty,
                     font_name="ThaiFont",
                     font_size="10sp",
-                    halign="center",
+                    halign="right",
                     valign="middle",
+                    size_hint_x=None,
+                    width=dp(58),
                 ),
             )
 
@@ -440,9 +452,6 @@ class CountStockScanScreen(CountStockBaseScreen):
                 table.add_widget(cell)
 
     def open_edit_location(self, row, *_):
-        if database.row_has_been_synced(row):
-            self.show_error("รายการที่ Sync แล้วไม่สามารถแก้ Location ได้")
-            return
         field = MDTextField(
             text=str(row.get("location") or ""),
             hint_text="Location ใหม่",
@@ -473,7 +482,7 @@ class CountStockScanScreen(CountStockBaseScreen):
             database.update_pending_location(row_id, new_location)
             self._dismiss_dialog()
             self.refresh_recent()
-            self._focus_barcode()
+            self._focus_scan()
         except Exception as exc:
             self.show_error(str(exc))
 
@@ -504,7 +513,7 @@ class CountStockScanScreen(CountStockBaseScreen):
             database.delete_pending_row(row_id)
             self._dismiss_dialog()
             self.refresh_recent()
-            self._focus_barcode()
+            Clock.schedule_once(lambda _dt: self._focus_scan(), 0.05)
         except Exception as exc:
             self.show_error(str(exc))
 
@@ -515,7 +524,6 @@ class CountStockScanScreen(CountStockBaseScreen):
             except Exception:
                 pass
             self._dialog = None
-
 
 class CountStockExportScreen(CountStockBaseScreen):
     exporting = False
