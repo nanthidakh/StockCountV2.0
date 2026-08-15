@@ -7,6 +7,7 @@ from kivy.app import App
 from kivy.utils import platform
 from kivy.clock import Clock
 from kivy.factory import Factory
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.properties import BooleanProperty
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.boxlayout import MDBoxLayout
@@ -19,6 +20,11 @@ from countstock import database
 from countstock.sound import play_notification
 
 API_ROOT = "/API_HWK_CountStock_Data"
+
+
+class RecentClickableLabel(ButtonBehavior, MDLabel):
+    """Lightweight Recent cell; tap any cell in a row to select it."""
+    pass
 
 
 class CountStockBaseScreen(BaseScreen):
@@ -226,27 +232,27 @@ class CountStockScanScreen(CountStockBaseScreen):
         if self.staff_menu:
             self.staff_menu.dismiss()
 
-        # Staff เลือกจาก Dropdown เท่านั้น จากนั้นกลับเข้า scanner flow เดิม
-        if self.location_locked and self.ids.txt_location.text.strip():
-            self._focus_barcode()
-        else:
-            self._focus_location()
+        # เปลี่ยน Staff แล้วต้องกลับมาที่ Location เสมอ
+        # ไม่ซ่อน Soft Keyboard และไม่ย้ายไป Barcode เอง
+        self.location_locked = False
+        self._update_location_lock_ui()
+        Clock.schedule_once(lambda _dt: self._focus_location(), 0.05)
 
     # =====================================================
     # Location: original two-field scanner behavior
     # =====================================================
     def toggle_location_lock(self):
         if self.location_locked:
-            # Unlock = กลับไปยิง Location ที่ช่อง Location โดยตรง
+            # ปลดล็อก LOC -> ให้ผู้ใช้ยิง/พิมพ์ Location ใหม่ที่ txt_location
             self.location_locked = False
             self.ids.txt_location.text = ""
             self.ids.txt_barcode.text = ""
             self._clear_product_display()
             self._update_location_lock_ui()
-            Clock.schedule_once(lambda _dt: self._focus_location(), 0.10)
+            Clock.schedule_once(lambda _dt: self._focus_location(), 0.05)
             return
 
-        # กด Lock เองได้ในกรณีพิมพ์ Location ด้วยมือ
+        # กดล็อก LOC เองได้ กรณีพิมพ์ Location ด้วยมือ
         self.on_location_validate()
 
     def on_location_validate(self):
@@ -261,11 +267,10 @@ class CountStockScanScreen(CountStockBaseScreen):
             self.open_staff_menu()
             return
 
+        # ยิง Location + Enter สำเร็จ -> ล็อก Location แล้วไป Barcode
         self.location_locked = True
         self._update_location_lock_ui()
-
-        # Pattern เดียวกับ CountStock ตัวเดิม: Location Enter -> Barcode
-        Clock.schedule_once(lambda _dt: self._focus_barcode(), 0.10)
+        Clock.schedule_once(lambda _dt: self._focus_barcode(), 0.05)
 
     def _update_location_lock_ui(self):
         if "btn_lock_location" in self.ids:
@@ -348,20 +353,25 @@ class CountStockScanScreen(CountStockBaseScreen):
     # =====================================================
     def _focus_location(self):
         if self.location_locked:
-            self._focus_barcode()
             return
 
-        widget = self.ids.txt_location
-        if not widget.focus:
-            widget.focus = True
+        # เปลี่ยน focus แบบชัดเจน: Barcode -> Location
+        self.ids.txt_barcode.focus = False
+        self.ids.txt_location.focus = True
 
     def _focus_barcode(self):
+        # Location ถูกล็อกแล้ว Barcode เป็นช่องรับ Scanner หลัก
+        self.ids.txt_location.focus = False
         widget = self.ids.txt_barcode
         widget.text = ""
-        if not widget.focus:
-            widget.focus = True
+        widget.focus = True
 
     def force_barcode_focus(self):
+        # หลัง Scan ให้ Barcode คง focus ต่อเนื่อง
+        # แต่ถ้าผู้ใช้แตะ Location เองแล้ว ห้ามดึง focus กลับ
+        if self.ids.txt_location.focus:
+            return
+
         barcode = self.ids.txt_barcode
         if not barcode.focus:
             barcode.focus = True
@@ -399,29 +409,35 @@ class CountStockScanScreen(CountStockBaseScreen):
             scanned_value = str(row.get("scanned_value") or "-")
             qty = str(row.get("qty") or 0)
 
-            table.add_widget(MDLabel(
-                text=location,
-                font_name="ThaiFont",
-                font_size="10sp",
-                halign="left",
-                valign="middle",
-            ))
-            table.add_widget(MDLabel(
-                text=scanned_value,
-                font_name="ThaiFont",
-                font_size="10sp",
-                halign="left",
-                valign="middle",
-                shorten=True,
-                shorten_from="right",
-            ))
-            table.add_widget(MDLabel(
-                text=qty,
-                font_name="ThaiFont",
-                font_size="10sp",
-                halign="center",
-                valign="middle",
-            ))
+            cells = (
+                RecentClickableLabel(
+                    text=location,
+                    font_name="ThaiFont",
+                    font_size="10sp",
+                    halign="left",
+                    valign="middle",
+                ),
+                RecentClickableLabel(
+                    text=scanned_value,
+                    font_name="ThaiFont",
+                    font_size="10sp",
+                    halign="left",
+                    valign="middle",
+                    shorten=True,
+                    shorten_from="right",
+                ),
+                RecentClickableLabel(
+                    text=qty,
+                    font_name="ThaiFont",
+                    font_size="10sp",
+                    halign="center",
+                    valign="middle",
+                ),
+            )
+
+            for cell in cells:
+                cell.bind(on_release=partial(self.confirm_delete, row))
+                table.add_widget(cell)
 
     def open_edit_location(self, row, *_):
         if database.row_has_been_synced(row):
@@ -462,9 +478,6 @@ class CountStockScanScreen(CountStockBaseScreen):
             self.show_error(str(exc))
 
     def confirm_delete(self, row, *_):
-        if database.row_has_been_synced(row):
-            self.show_error("รายการที่ Sync แล้วไม่สามารถลบได้")
-            return
         self._dismiss_dialog()
         self._dialog = MDDialog(
             title="ยืนยันการลบ",

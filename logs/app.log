@@ -22296,3 +22296,53 @@
 2026-08-12 16:37:44,752 | INFO | SQLite Closed
 2026-08-12 16:37:44,753 | INFO | Application Closed
 2026-08-12 16:37:44,773 | INFO | Application Closed
+2026-08-13 08:15:39,125 | INFO | Device : MGR02
+2026-08-13 08:15:39,580 | INFO | SQLite Connected
+2026-08-13 08:15:39,582 | INFO | Database Ready
+2026-08-13 08:15:40,055 | INFO | KV Loaded
+2026-08-13 08:48:29,251 | INFO | SQLite Closed
+2026-08-13 08:48:30,200 | INFO | Application Closed
+2026-08-13 08:48:30,840 | INFO | Application Closed
+2026-08-13 09:40:16,864 | INFO | Device : MGR02
+2026-08-13 09:40:16,924 | INFO | SQLite Connected
+2026-08-13 09:40:16,926 | INFO | Database Ready
+2026-08-13 09:40:17,064 | INFO | KV Loaded
+2026-08-13 09:41:18,710 | INFO | SQLite Closed
+2026-08-13 09:41:18,711 | INFO | Application Closed
+2026-08-13 09:41:18,715 | INFO | Application Closed
+2026-08-13 11:17:48,174 | INFO | Device : MGR02
+2026-08-13 11:17:48,259 | INFO | SQLite Connected
+2026-08-13 11:17:48,260 | INFO | Database Ready
+2026-08-13 11:17:48,910 | INFO | KV Loaded
+2026-08-13 11:24:51,897 | INFO | SQLite Closed
+2026-08-13 11:24:51,898 | INFO | Application Closed
+2026-08-13 11:24:51,902 | INFO | Application Closed
+2026-08-15 09:51:40,754 | INFO | Device : MGR02
+2026-08-15 09:51:49,510 | INFO | SQLite Connected
+2026-08-15 09:51:49,511 | INFO | Database Ready
+2026-08-15 09:52:05,120 | INFO | KV Loaded
+2026-08-15 11:31:18,254 | INFO | Device : MGR02
+2026-08-15 11:31:18,315 | INFO | SQLite Connected
+2026-08-15 11:31:18,317 | INFO | Database Ready
+2026-08-15 11:31:18,705 | INFO | KV Loaded
+2026-08-15 11:34:24,420 | INFO | SQLite Closed
+2026-08-15 11:34:24,423 | INFO | Application Closed
+2026-08-15 11:35:13,720 | INFO | Device : MGR02
+2026-08-15 11:35:13,724 | INFO | SQLite Connected
+2026-08-15 11:35:13,726 | INFO | Database Ready
+2026-08-15 11:35:13,874 | INFO | KV Loaded
+2026-08-15 11:35:29,459 | INFO | SQLite Closed
+2026-08-15 11:35:29,459 | INFO | Application Closed
+2026-08-15 11:41:45,441 | INFO | Device : MGR02
+2026-08-15 11:41:45,445 | INFO | SQLite Connected
+2026-08-15 11:41:45,447 | INFO | Database Ready
+2026-08-15 11:41:45,581 | INFO | KV Loaded
+2026-08-15 11:52:03,831 | INFO | SQLite Closed
+2026-08-15 11:52:03,832 | INFO | Application Closed
+2026-08-15 11:52:10,697 | INFO | Device : MGR02
+2026-08-15 11:52:10,701 | INFO | SQLite Connected
+2026-08-15 11:52:10,703 | INFO | Database Ready
+2026-08-15 11:52:10,844 | INFO | KV Loaded
+2026-08-15 11:55:35,021 | INFO | SQLite Worker Connection Created
+2026-08-15 12:08:50,938 | INFO | SQLite Closed
+2026-08-15 12:08:50,939 | INFO | Application Closed

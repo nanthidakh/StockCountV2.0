@@ -217,7 +217,7 @@ def find_product(value: str):
 
 def add_or_increment(location: str, staff: str, product_code: str, scanned_value: str):
     """Increment only an unsynced row; synced history remains immutable."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     with connect() as conn:
         row = conn.execute("""
             SELECT id, qty
@@ -257,9 +257,10 @@ def recent(limit=10):
             SELECT id, location, staff_name, product_code, scanned_value, qty,
                    scan_date, sync_status, sync_scan_data, sync_scan_slottag
             FROM countstock_scan_data
+            WHERE sync_status = ?
             ORDER BY id DESC
             LIMIT ?
-        """, (safe_limit,)).fetchall()]
+        """, (SYNC_PENDING, safe_limit)).fetchall()]
 
 
 def get_scan_stats():
@@ -314,7 +315,7 @@ def mark_rows_synced(row_ids, table_name: str):
         return 0
     status_column, date_column = _target_column(table_name)
     placeholders = ",".join("?" for _ in ids)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     with connect() as conn:
         cursor = conn.execute(
             f"UPDATE countstock_scan_data "
