@@ -25,11 +25,11 @@ class MainMenuScreen(MDScreen):
         app = App.get_running_app()
         if "lbl_device" in self.ids:
             self.ids.lbl_device.text = (
-                "Device: "
+                "ชื่อเครื่อง: "
                 + str(getattr(app, "device_name", "") or "UNKNOWN_DEVICE")
             )
         if "lbl_status" in self.ids:
-            self.ids.lbl_status.text = "พร้อมใช้งาน"
+            self.ids.lbl_status.text = "เลือกเมนูที่ต้องการใช้งาน"
 
 
     def go_launcher(self):

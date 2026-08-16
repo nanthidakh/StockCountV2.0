@@ -18,7 +18,7 @@
                 on_release: root.go_launcher()
 
             MDLabel:
-                text: "HWK Stock Count"
+                text: "Hardware King Stock Count"
                 font_name: "ThaiFont"
                 bold: True
                 halign: "center"
@@ -29,7 +29,7 @@
 
         MDLabel:
             id: lbl_device
-            text: "Device: -"
+            text: "ชื่อเครื่อง : "
             font_name: "ThaiFont"
             halign: "center"
             size_hint_y: None
@@ -38,7 +38,7 @@
 
         MDLabel:
             id: lbl_status
-            text: "พร้อมใช้งาน"
+            text: "เลือกเมนูที่ต้องการใช้งาน"
             font_name: "ThaiFont"
             halign: "center"
             theme_text_color: "Secondary"
@@ -55,7 +55,7 @@
                 height: self.minimum_height
 
                 MDRaisedButton:
-                    text: "ตั้งค่า"
+                    text: "1. ตั้งค่า"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -63,7 +63,7 @@
                     on_release: root.go_to("config_screen", "config")
 
                 MDRaisedButton:
-                    text: "Download Plan"
+                    text: "2. นำเข้าข้อมูลแผนนับสต๊อก"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -71,7 +71,7 @@
                     on_release: root.go_to("download_screen", "download")
 
                 MDRaisedButton:
-                    text: "นับสินค้า"
+                    text: "3. นับสินค้า"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -79,7 +79,7 @@
                     on_release: root.go_to("count_screen", "count")
 
                 MDRaisedButton:
-                    text: "Audit"
+                    text: "4. Audit"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
@@ -87,28 +87,10 @@
                     on_release: root.go_to("audit_screen", "audit")
 
                 MDRaisedButton:
-                    text: "ออกจากโปรแกรม"
+                    text: "5. ออกจากโปรแกรม"
                     font_name: "ThaiFont"
                     size_hint_x: 1
                     size_hint_y: None
                     height: "48dp"
                     md_bg_color: 0.35, 0.35, 0.35, 1
                     on_release: root.confirm_exit_app()
-
-                MDLabel:
-                    text: "Developer"
-                    font_name: "ThaiFont"
-                    bold: True
-                    halign: "center"
-                    size_hint_y: None
-                    height: "36dp"
-
-                MDRaisedButton:
-                    id: btn_reset_local
-                    text: "ล้างข้อมูลในเครื่อง"
-                    font_name: "ThaiFont"
-                    size_hint_x: 1
-                    size_hint_y: None
-                    height: "52dp"
-                    md_bg_color: 0.8, 0.18, 0.18, 1
-                    on_release: root.confirm_reset_local_database()
